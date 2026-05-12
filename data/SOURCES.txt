@@ -1,0 +1,19 @@
+# Veri Kaynakları
+# Bu dosyayı doldurun! Sunum ve raporda belirtmek zorunludur.
+
+# ── Kullanılan Kaynaklar ──────────────────────────────────────────────────────
+
+# [Dataset 1] Cars Body Type Cropped
+# URL     : https://www.kaggle.com/datasets/ademboukhris/cars-body-type-cropped
+# Lisans  : CC0 (Public Domain)
+# Sınıflar: SUV, VAN, Sedan, Hatchback, Pick-Up
+# Görsel  : ~1000/sınıf
+
+# [Dataset 2] Stanford Car Body Type Data
+# URL     : https://www.kaggle.com/datasets/mayurmahurkar/stanford-car-body-type-data
+# Lisans  : Belirtilmiş (Kaggle sayfasına bakın)
+# Sınıflar: Çeşitli (STATION_WAGON için kullanıldı)
+
+# [Diğer Kaynaklar] — Ekleyin:
+# MICRO sınıfı   : ...
+# F1 sınıfı      : ...

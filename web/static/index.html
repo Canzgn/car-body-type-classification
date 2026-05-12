@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Araba Gövde Tipi Sınıflandırıcı</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <header class="site-header">
+    <h1>Araba Gövde Tipi Sınıflandırıcı</h1>
+    <p>EfficientNet-B0 &nbsp;·&nbsp; 8 Sınıf &nbsp;·&nbsp; Kocaeli Üniversitesi</p>
+  </header>
+
+  <main class="main-grid">
+
+    <!-- SOL: Yükleme + Önizleme -->
+    <section class="panel upload-panel">
+      <h2>Görsel Yükle</h2>
+
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Görsel yükle">
+        <div class="drop-icon">📁</div>
+        <p>Sürükleyip bırakın veya tıklayın</p>
+        <span>JPG &nbsp;·&nbsp; PNG &nbsp;·&nbsp; WEBP</span>
+        <input type="file" id="fileInput" accept="image/*" hidden />
+      </div>
+
+      <div class="preview-wrapper" id="previewWrapper" style="display:none">
+        <img id="previewImage" alt="Yüklenen görselin önizlemesi" />
+        <button id="predictBtn" class="btn-primary">
+          <span id="btnText">Tahmin Yap</span>
+          <span id="btnLoader" class="loader" style="display:none" aria-hidden="true"></span>
+        </button>
+        <button id="resetBtn" class="btn-secondary">Sıfırla</button>
+      </div>
+    </section>
+
+    <!-- SAĞ: Sonuç -->
+    <section class="panel result-panel" id="resultPanel" style="display:none" aria-live="polite">
+      <h2>Tahmin Sonucu</h2>
+
+      <div class="result-badge">
+        <div class="result-class" id="resultClass">—</div>
+        <div class="result-conf"  id="resultConf">—</div>
+      </div>
+
+      <div class="chart-wrapper">
+        <canvas id="barChart" aria-label="Sınıf olasılık dağılımı" role="img"></canvas>
+      </div>
+
+      <p id="errorMsg" class="error-msg" style="display:none"></p>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

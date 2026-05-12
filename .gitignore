@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Veri dosyaları (görseller git'e alınmaz)
+data/raw/**
+data/train/**/*.jpg
+data/train/**/*.jpeg
+data/train/**/*.png
+data/train/**/*.webp
+data/train/**/*.bmp
+data/val/**/*.jpg
+data/val/**/*.jpeg
+data/val/**/*.png
+data/val/**/*.webp
+data/val/**/*.bmp
+
+# Eğitilmiş modeller (büyük dosya)
+*.pth
+*.pt
+*.h5
+*.onnx
+
+# Çıktılar (üretilen dosyalar)
+outputs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
