@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .env
+.venv/
 venv/
 env/
 *.egg-info/
@@ -21,6 +22,11 @@ data/val/**/*.jpeg
 data/val/**/*.png
 data/val/**/*.webp
 data/val/**/*.bmp
+data/test/**/*.jpg
+data/test/**/*.jpeg
+data/test/**/*.png
+data/test/**/*.webp
+data/test/**/*.bmp
 
 # Eğitilmiş modeller (büyük dosya)
 *.pth

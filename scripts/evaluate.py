@@ -73,38 +73,42 @@ def get_predictions(model, loader, device):
 
 def plot_training_curves(history: dict, save_path: Path):
     epochs = range(1, len(history['train_loss']) + 1)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    save_dir = save_path.parent
 
-    # Loss
-    ax1.plot(epochs, history['train_loss'], color='#e74c3c', linewidth=2, label='Training Loss')
-    ax1.plot(epochs, history['val_loss'],   color='#3498db', linewidth=2, label='Validation Loss')
-    ax1.set_title('Training & Validation Loss', fontsize=13, fontweight='bold')
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss')
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-
-    # Accuracy
-    ax2.plot(epochs, [a * 100 for a in history['train_acc']], color='#e74c3c', linewidth=2, label='Training Accuracy')
-    ax2.plot(epochs, [a * 100 for a in history['val_acc']],   color='#3498db', linewidth=2, label='Validation Accuracy')
-    ax2.set_title('Training & Validation Accuracy', fontsize=13, fontweight='bold')
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('Accuracy (%)')
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-
-    plt.suptitle('Model Eğitim Süreci', fontsize=15, y=1.01)
+    # ── Loss grafiği (ayrı dosya) ─────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+    ax.plot(epochs, history['train_loss'], color='#e74c3c', linewidth=2, label='Training Loss')
+    ax.plot(epochs, history['val_loss'],   color='#3498db', linewidth=2, label='Validation Loss')
+    ax.set_title('Training & Validation Loss', fontsize=13, fontweight='bold')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.legend()
+    ax.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_dir / 'training_loss.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f'Grafik kaydedildi: {save_path}')
+
+    # ── Accuracy grafiği (ayrı dosya) ─────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+    ax.plot(epochs, [a * 100 for a in history['train_acc']], color='#e74c3c', linewidth=2, label='Training Accuracy')
+    ax.plot(epochs, [a * 100 for a in history['val_acc']],   color='#3498db', linewidth=2, label='Validation Accuracy')
+    ax.set_title('Training & Validation Accuracy', fontsize=13, fontweight='bold')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy (%)')
+    ax.legend()
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_dir / 'training_accuracy.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print(f'Grafikler kaydedildi: training_loss.png, training_accuracy.png')
 
 
 def plot_confusion_matrix(y_true, y_pred, save_path: Path):
     cm = confusion_matrix(y_true, y_pred)
     cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
-    plt.figure(figsize=(11, 9))
+    plt.figure(figsize=(5, 4.2))
     sns.heatmap(
         cm_norm,
         annot=True,
@@ -115,12 +119,13 @@ def plot_confusion_matrix(y_true, y_pred, save_path: Path):
         linewidths=0.5,
         vmin=0,
         vmax=1,
+        annot_kws={"size": 7},
     )
-    plt.title('Normalized Confusion Matrix', fontsize=14, fontweight='bold', pad=15)
-    plt.ylabel('Gerçek Sınıf', fontsize=12)
-    plt.xlabel('Tahmin Edilen Sınıf', fontsize=12)
-    plt.xticks(rotation=45, ha='right')
-    plt.yticks(rotation=0)
+    plt.title('Normalized Confusion Matrix', fontsize=10, fontweight='bold', pad=10)
+    plt.ylabel('Gerçek Sınıf', fontsize=9)
+    plt.xlabel('Tahmin Edilen Sınıf', fontsize=9)
+    plt.xticks(rotation=45, ha='right', fontsize=7)
+    plt.yticks(rotation=0, fontsize=7)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
@@ -143,12 +148,17 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-    val_dataset = datasets.ImageFolder(DATA_DIR / 'val', transform=val_transform)
-    val_loader  = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    # Test seti varsa onu kullan (gerçek değerlendirme), yoksa val setine geri dön
+    eval_dir = DATA_DIR / 'test' if (DATA_DIR / 'test').exists() else DATA_DIR / 'val'
+    eval_label = 'TEST' if eval_dir.name == 'test' else 'VAL'
+    print(f'Değerlendirme seti: {eval_dir} ({eval_label})')
 
-    print(f'Sınıf eşlemesi: {val_dataset.class_to_idx}')
+    eval_dataset = datasets.ImageFolder(eval_dir, transform=val_transform)
+    eval_loader  = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    y_true, y_pred = get_predictions(model, val_loader, device)
+    print(f'Sınıf eşlemesi: {eval_dataset.class_to_idx}')
+
+    y_true, y_pred = get_predictions(model, eval_loader, device)
 
     # ── Metrikleri yazdır ve kaydet ───────────────────────────────────────────
     report = classification_report(y_true, y_pred, target_names=DISPLAY_NAMES, digits=4)

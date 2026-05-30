@@ -1,19 +1,65 @@
-# Veri Kaynakları
-# Bu dosyayı doldurun! Sunum ve raporda belirtmek zorunludur.
+Araba Gövde Tipi Sınıflandırma Projesi — Veri Kaynakları
+Kocaeli Üniversitesi, Yazılım Laboratuvarı II, Proje III
 
-# ── Kullanılan Kaynaklar ──────────────────────────────────────────────────────
+=============================================================
+KAYNAK 1 — Cars Body Type Cropped (Kaggle)
+=============================================================
+URL      : https://www.kaggle.com/datasets/ademboukhris/cars-body-type-cropped
+Lisans   : CC0 1.0 (Public Domain — Ticari kullanım dahil serbest)
+Kullanım : SUV, VAN, SEDAN, HATCHBACK, PICKUP sınıfları için temel veri kaynağı
+Miktar   : ~1000 görsel/sınıf (kullanılan: 800/sınıf, CLIP filtresi sonrası)
+Format   : JPG/JPEG, farklı açı, arka plan ve ışık koşulları
+Not      : Orijinal sınıf adları (pick-up, sedan vb.) proje formatına
+           normalize edilmiştir (PICKUP, SEDAN vb.)
 
-# [Dataset 1] Cars Body Type Cropped
-# URL     : https://www.kaggle.com/datasets/ademboukhris/cars-body-type-cropped
-# Lisans  : CC0 (Public Domain)
-# Sınıflar: SUV, VAN, Sedan, Hatchback, Pick-Up
-# Görsel  : ~1000/sınıf
+=============================================================
+KAYNAK 2 — Stanford Car Body Type Data (Kaggle)
+=============================================================
+URL      : https://www.kaggle.com/datasets/mayurmahurkar/stanford-car-body-type-data
+Lisans   : Araştırma amaçlı kullanım (Stanford Cars Dataset tabanlı)
+Kullanım : STATION_WAGON sınıfı için ek görsel kaynağı
+Miktar   : Yüzlerce station wagon görseli (kullanılan: ~400 adet)
+Format   : JPG/JPEG
 
-# [Dataset 2] Stanford Car Body Type Data
-# URL     : https://www.kaggle.com/datasets/mayurmahurkar/stanford-car-body-type-data
-# Lisans  : Belirtilmiş (Kaggle sayfasına bakın)
-# Sınıflar: Çeşitli (STATION_WAGON için kullanıldı)
+=============================================================
+KAYNAK 3 — DuckDuckGo Görüntü Arama Motoru (Otomatik İndirme)
+=============================================================
+URL      : https://duckduckgo.com (ddgs Python kütüphanesi aracılığıyla)
+Kullanım : MICRO ve STATION_WAGON sınıfları için ek görsel toplanması
+Arama Terimleri:
+  STATION_WAGON: "station wagon car side view", "estate car", "kombi araba",
+                 "break car", "touring wagon", "family wagon side view",
+                 "volvo estate", "subaru outback wagon", "audi avant wagon"
+  MICRO        : "microcar side view", "smart fortwo", "fiat 500 side view",
+                 "city car", "kei car japan", "mini car side view",
+                 "tata nano", "suzuki alto side view", "volkswagen up"
+Miktar   : ~200-400 görsel/sınıf
+Format   : JPG/PNG/WEBP
 
-# [Diğer Kaynaklar] — Ekleyin:
-# MICRO sınıfı   : ...
-# F1 sınıfı      : ...
+=============================================================
+KAYNAK 4 — F1/Formula 1 Araçları (Yerel Koleksiyon)
+=============================================================
+Kaynak   : Kişisel koleksiyon + açık lisanslı web görselleri
+Kullanım : F1 (AÇIK TEKERLEKLİ) sınıfı için
+Arama Terimleri: "formula 1 car side view", "open wheel racing car",
+                 "F1 race car 2020", "formula one cockpit view"
+Miktar   : ~800 görsel (CLIP filtresi sonrası tam 800'e tamamlandı)
+Format   : JPG/PNG
+
+=============================================================
+KALİTE FİLTRESİ
+=============================================================
+Yöntem   : OpenCLIP ViT-B/32 modeli (open_clip_torch kütüphanesi)
+İşlem    : Her görsel için "a photo of a [sınıf] car" metin eşleşmesi
+Eşik     : cosine similarity >= 0.25
+Sonuç    : Alakasız görseller (logo, çizim, iç mekan, vb.) otomatik elendi
+Toplam   : 6400 görsel (800 × 8 sınıf), hepsi CLIP doğrulamasından geçti
+
+=============================================================
+VERİ SETİ BÖLÜNME
+=============================================================
+Yöntem   : Rastgele bölme, seed=42 (tekrar üretilebilir)
+Train    : 4480 görsel (%70 — 560/sınıf)
+Val      : 960  görsel (%15 — 120/sınıf)
+Test     : 960  görsel (%15 — 120/sınıf)
+Not      : Test seti eğitim sürecinde HİÇBİR ŞEKİLDE kullanılmamıştır.

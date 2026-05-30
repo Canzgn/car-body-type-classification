@@ -135,7 +135,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=3, factor=0.5, verbose=True
+        optimizer, mode='min', patience=3, factor=0.5
     )
 
     # ── Eğitim Döngüsü ────────────────────────────────────────────────────────
