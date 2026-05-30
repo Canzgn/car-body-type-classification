@@ -148,3 +148,8 @@ async def predict(file: UploadFile = File(...)):
         'confidence_percent': f'{top_confidence * 100:.1f}%',
         'all_predictions':   all_predictions,
     })
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("web.main:app", host="127.0.0.1", port=8000, reload=True)

@@ -1,0 +1,351 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[turkish]{babel}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{cite}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{./}}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\title{EfficientNet-B0 Tabanlı Araba Gövde Tipi Sınıflandırması}
+
+\author{
+  \IEEEauthorblockN{Barışcan Özgen}
+  \IEEEauthorblockA{
+    Bilgisayar Mühendisliği Bölümü\\
+    Kocaeli Üniversitesi\\
+    Kocaeli, Türkiye\\
+    230201057}
+}
+
+\begin{document}
+\maketitle
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{abstract}
+Bu çalışmada, sekiz farklı araba gövde tipini (SUV, Van, Station Wagon, Micro,
+Açık Tekerlekli, Sedan, Hatchback ve Pick-Up) sınıflandırmak amacıyla
+EfficientNet-B0 mimarisi üzerine kurulu bir transfer öğrenme sistemi
+geliştirilmiştir. Kaggle veri setleri ve DuckDuckGo görüntü arama motoru
+aracılığıyla derlenen 6.400 görsellik özel bir veri seti oluşturulmuş;
+CLIP (Contrastive Language-Image Pre-Training) modeli ile semantik kalite
+filtresi uygulanmıştır. Veri seti \%70/\%15/\%15 oranında eğitim, doğrulama
+ve test kümelerine ayrılmıştır. Adam optimizer, ReduceLROnPlateau zamanlayıcı
+ve erken durdurma (Early Stopping) teknikleriyle eğitilen model, test kümesinde
+\%93,54 doğruluk ve 0,9357 Macro F1 skoru elde etmiştir. Eğitilen model,
+gerçek zamanlı tahmin yapabilen FastAPI tabanlı bir web arayüzüne entegre
+edilmiştir.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Araba Gövde Tipi Sınıflandırma, EfficientNet-B0, Transfer Öğrenme,
+CLIP, Derin Öğrenme, FastAPI, Görüntü Sınıflandırma
+\end{IEEEkeywords}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Giriş}
+
+Araç tipi tanıma, akıllı trafik yönetimi, otopark sistemleri, otonom sürüş
+ve sigorta uygulamaları gibi birçok gerçek dünya probleminde kritik bir rol
+oynamaktadır. Geleneksel görüntü işleme yöntemleri bu alanda sınırlı başarı
+sergilemiş olsa da derin öğrenme tekniklerinin gelişmesiyle birlikte sınıflama
+doğruluğu önemli ölçüde artmıştır \cite{lecun2015deep}.
+
+Convolutional Neural Network (CNN) mimarileri, özellikle ImageNet gibi büyük
+veri kümeleri üzerinde önceden eğitilmiş modeller, az sayıda etiketli veriyle
+bile yüksek sınıflandırma doğruluğu elde edilmesine olanak sağlamaktadır
+\cite{tan2019efficientnet}. Bu çalışmada, parametre verimliliği açısından
+üstün bir performans sunan EfficientNet-B0 mimarisi seçilmiş; ImageNet
+ağırlıkları kullanılarak transfer öğrenme uygulanmıştır.
+
+Çalışmanın temel katkıları şöyle özetlenebilir:
+\begin{itemize}
+  \item Kaggle ve DuckDuckGo kaynaklarından derlenen, CLIP tabanlı semantik
+        kalite filtresiyle temizlenen özgün bir veri seti oluşturulması.
+  \item EfficientNet-B0 mimarisinin sekiz sınıflı araba gövde tipi
+        sınıflandırmasına transfer öğrenme yöntemiyle uyarlanması.
+  \item Eğitilmiş modelin hızlı çıkarım kapasiteli bir web arayüzüne
+        entegrasyonu.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Veri Seti}
+
+\subsection{Veri Toplama}
+
+Veri toplama süreci birden fazla kaynaktan yürütülmüştür. İlk aşamada
+Kaggle üzerinde yer alan \emph{Cars Body Type Cropped} \cite{boukhris2023cars}
+ve \emph{Stanford Car Body Type Data} \cite{krause2013stanford} veri setleri
+kullanılmıştır. Birinci veri seti SUV, Van, Sedan, Hatchback ve Pick-Up
+sınıfları için temel görsel kaynağı oluştururken; ikinci veri seti
+Station Wagon sınıfının tamamlanmasında kullanılmıştır.
+
+Micro ve Station Wagon sınıfları için ek görsel ihtiyacı, \texttt{ddgs} Python
+kütüphanesi aracılığıyla DuckDuckGo görüntü arama motoru üzerinden otomatik
+indirme yöntemiyle karşılanmıştır. Station Wagon için ``station wagon car side
+view'', ``estate car'', ``kombi araba'' gibi; Micro için ``smart fortwo'',
+``fiat 500 side view'', ``microcar side view'' gibi arama terimleri
+kullanılmıştır. F1 (Açık Tekerlekli) sınıfı için ise ``formula 1 car side
+view'' ve ``open wheel racing car'' arama terimlerine ek olarak kişisel
+koleksiyon görsellerinden faydalanılmıştır.
+
+\subsection{Semantik Kalite Filtresi}
+
+Ham görsel toplamada oluşabilecek gürültüyü (logo, çizim, iç mekan
+fotoğrafları, alakasız nesneler vb.) gidermek amacıyla OpenAI'nin CLIP
+\cite{radford2021learning} modeli (ViT-B/32 omurgası) kullanılmıştır. Her
+görsel için ``a photo of a [sınıf] car'' metin sorgusuyla hesaplanan kosinüs
+benzerlik skoru 0,25 eşiğinin altında kalan görseller veri setinden çıkarılmış
+ve yerlerine yeni görseller eklenmiştir. Bu işlem, her sınıf tam 800 kaliteli
+görsele ulaşana kadar tekrarlanmıştır.
+
+\subsection{Veri Seti İstatistikleri}
+
+Tablo \ref{tab:dataset}'de nihai veri setinin sınıf bazlı dağılımı
+verilmiştir. Her sınıfta 800 görsel bulunmakta olup toplam 6.400 görsel
+\%70/\%15/\%15 oranında eğitim/doğrulama/test kümelerine rastgele
+bölünmüştür (sabit seed=42).
+
+\begin{table}[h]
+\caption{Veri Seti Dağılımı}
+\label{tab:dataset}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Sınıf} & \textbf{Toplam} & \textbf{Eğitim} & \textbf{Doğrulama} & \textbf{Test} \\
+\midrule
+SUV             & 800 & 560 & 120 & 120 \\
+Van             & 800 & 560 & 120 & 120 \\
+Station Wagon   & 800 & 560 & 120 & 120 \\
+Micro           & 800 & 560 & 120 & 120 \\
+Açık Tekerlekli & 800 & 560 & 120 & 120 \\
+Sedan           & 800 & 560 & 120 & 120 \\
+Hatchback       & 800 & 560 & 120 & 120 \\
+Pick-Up         & 800 & 560 & 120 & 120 \\
+\midrule
+\textbf{Toplam} & \textbf{6400} & \textbf{4480} & \textbf{960} & \textbf{960} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Yöntem}
+
+\subsection{Ön İşleme ve Veri Çoğaltma}
+
+Tüm görseller modelin beklediği 224$\times$224 piksel boyutuna yeniden
+ölçeklendirilmiş ve ImageNet istatistikleriyle
+($\mu$=[0.485, 0.456, 0.406], $\sigma$=[0.229, 0.224, 0.225])
+normalize edilmiştir.
+
+Eğitim kümesinde aşırı öğrenmeyi azaltmak ve modelin farklı koşullara
+genelleme yeteneğini artırmak amacıyla veri çoğaltma (data augmentation)
+uygulanmıştır. Uygulanan dönüşümler şunlardır:
+
+\begin{itemize}
+  \item \textbf{RandomHorizontalFlip} ($p=0,5$): Yatay çevirme
+  \item \textbf{RandomRotation} ($\pm15°$): Rastgele döndürme
+  \item \textbf{ColorJitter} (brightness=0,2; contrast=0,2;
+        saturation=0,2; hue=0,05): Renk dönüşümleri
+  \item \textbf{RandomPerspective} (distortion=0,2; $p=0,3$):
+        Perspektif bozma
+\end{itemize}
+
+Doğrulama ve test kümelerine yalnızca yeniden ölçekleme ve normalizasyon
+uygulanmıştır.
+
+\subsection{Model Mimarisi}
+
+EfficientNet-B0 \cite{tan2019efficientnet}, bileşik ölçekleme (compound
+scaling) yöntemiyle derinlik, genişlik ve çözünürlük boyutlarını birlikte
+optimize eden verimli bir CNN mimarisidir. Yaklaşık 5,3 milyon parametreye
+ve ImageNet'te \%77,1 top-1 doğruluğa sahip olan bu model,
+hesaplama maliyeti-doğruluk dengesi açısından üstün bir tercih sunmaktadır.
+
+Bu çalışmada, ImageNet-1K ağırlıklarıyla önceden eğitilmiş EfficientNet-B0
+modeli transfer öğrenme çerçevesinde kullanılmıştır. Orijinal 1.000 nöronlu
+sınıflandırma katmanı, projemizin 8 sınıfına uygun
+$\text{Linear}(1280 \rightarrow 8)$ katmanıyla değiştirilmiştir.
+Modelin tüm parametreleri ince ayar (fine-tuning) sürecinde
+eğitilebilir olarak bırakılmıştır. Nihai model boyutu yaklaşık 46 MB
+olup proje sınırı olan 95 MB'nin çok altındadır.
+
+\subsection{Eğitim Detayları}
+
+Model, NVIDIA RTX 4070 Laptop GPU üzerinde PyTorch 2.x ile eğitilmiştir.
+Kullanılan hiperparametreler Tablo \ref{tab:hyperparams}'de verilmiştir.
+
+\begin{table}[h]
+\caption{Hiperparametreler}
+\label{tab:hyperparams}
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Hiperparametre} & \textbf{Değer} \\
+\midrule
+Görüntü boyutu      & $224 \times 224$ piksel \\
+Batch boyutu        & 32 \\
+Maksimum epoch      & 50 \\
+Öğrenme oranı       & $10^{-4}$ \\
+Ağırlık bozulması   & $10^{-4}$ \\
+Kayıp fonksiyonu    & CrossEntropyLoss \\
+Optimizer           & Adam \cite{kingma2014adam} \\
+LR Zamanlayıcı      & ReduceLROnPlateau (factor=0,5; patience=3) \\
+Erken Durdurma      & Val. kaybına göre (patience=7) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Kayıp fonksiyonu olarak çok sınıflı sınıflandırma için standart olan
+Cross-Entropy Loss kullanılmıştır. Öğrenme oranı, doğrulama kaybında
+üst üste 3 epoch boyunca iyileşme gözlenmediğinde 0,5 çarpanıyla
+azaltılmıştır. Doğrulama kaybında 7 epoch boyunca iyileşme
+sağlanamadığında eğitim otomatik olarak durdurulmuştur.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Deneysel Sonuçlar}
+
+\subsection{Eğitim Süreci}
+
+Model, erken durdurma mekanizması devreye girdiğinde 18. epoch'ta eğitimi
+tamamlamıştır. En iyi model ağırlıkları, 11. epoch'ta elde edilen
+Val. Loss = 0,1345 ve Val. Acc = \%95,10 değerlerine karşılık gelen
+kontrol noktasından alınmıştır.
+
+Şekil \ref{fig:curves}'de eğitim/doğrulama
+kayıp ve doğruluk eğrileri gösterilmiştir. Eğitim kaybının monoton biçimde
+düşmesi ve doğrulama kaybının belirli bir değerde stabilize olması, modelin
+veri setine uygun biçimde öğrendiğini göstermektedir. Eğitim ve doğrulama
+doğrulukları arasındaki dar boşluk, ciddi bir aşırı öğrenme (overfitting)
+olmadığının işaretidir.
+
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=0.48\textwidth]{training_loss.png}
+  \hfill
+  \includegraphics[width=0.48\textwidth]{training_accuracy.png}
+  \caption{Sol: Eğitim ve Doğrulama Kayıp Eğrisi; Sağ: Eğitim ve Doğrulama Doğruluk Eğrisi (18 Epoch)}
+  \label{fig:curves}
+\end{figure*}
+
+\subsection{Performans Metrikleri}
+
+Model, eğitim sürecinde hiç kullanılmamış 960 görsellik test kümesi üzerinde
+değerlendirilmiştir.
+Tablo \ref{tab:results}'de sınıf bazlı Precision,
+Recall ve F1 skorları verilmiştir.
+
+\begin{table}[h]
+\caption{Test Kümesi Sınıflandırma Sonuçları (support=120/sınıf)}
+\label{tab:results}
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Sınıf} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+\midrule
+Açık Tekerlekli & 1,0000 & 1,0000 & 1,0000 \\
+Hatchback       & 0,8254 & 0,8667 & 0,8455 \\
+Micro           & 0,9237 & 0,9083 & 0,9160 \\
+Pick-Up         & 0,9667 & 0,9667 & 0,9667 \\
+Sedan           & 0,9720 & 0,8667 & 0,9163 \\
+Station Wagon   & 0,8692 & 0,9417 & 0,9040 \\
+SUV             & 0,9661 & 0,9500 & 0,9580 \\
+Van             & 0,9752 & 0,9833 & 0,9793 \\
+\midrule
+\textbf{Macro Ort.}    & 0,9373 & 0,9354 & \textbf{0,9357} \\
+\textbf{Weighted Ort.} & 0,9373 & 0,9354 & \textbf{0,9357} \\
+\midrule
+\multicolumn{3}{l}{\textbf{Test Doğruluğu}} & \textbf{\%93,54} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=0.33\textwidth]{confusion_matrix.png}
+  \caption{Normalize Edilmiş Karışıklık Matrisi (Test Kümesi, $n$=960)}
+  \label{fig:cm}
+\end{figure*}
+
+\subsection{Karışıklık Matrisi Analizi}
+
+Şekil \ref{fig:cm}'de normalize edilmiş karışıklık matrisi gösterilmektedir.
+Açık Tekerlekli (F1) sınıfı mükemmel bir \%100 sınıflandırma başarısı
+sergilemiştir; bunun temel nedeni bu araç tipinin diğer sınıflardan belirgin
+biçimde farklı olan açık kokpit ve tek koltuk tasarımıdır.
+
+En düşük performans Hatchback sınıfında gözlemlenmiştir (F1=0,8455). Bu
+durum, Hatchback ve Sedan araç tiplerinin benzer gövde hatları paylaşmasından
+kaynaklanmaktadır; küçük bagaj açıklığı ve arka cam eğimi gibi ince
+görsel farklılıklar modelin hata yapmasına yol açabilmektedir.
+Station Wagon sınıfı da benzer nedenlerle Sedan ile zaman zaman karışmaktadır
+(F1=0,9040).
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Web Arayüzü}
+
+Eğitilen model, FastAPI \cite{fastapi} framework'ü kullanılarak bir REST API
+aracılığıyla sunulmuştur. Kullanıcı arayüzü saf HTML, CSS ve Vanilla
+JavaScript ile geliştirilmiş olup herhangi bir frontend framework bağımlılığı
+bulunmamaktadır.
+
+Arayüz dört temel bileşenden oluşmaktadır:
+\begin{enumerate}
+  \item \textbf{Görüntü Yükleme Alanı:} Sürükle-bırak (drag-and-drop) ve
+        dosya seçici (file picker) desteğiyle JPG, PNG ve WEBP
+        formatlarını kabul etmektedir.
+  \item \textbf{Görüntü Önizlemesi:} Yüklenen görsel anında
+        ekranda gösterilmektedir.
+  \item \textbf{Tahmin Butonu:} ``Tahmin Yap'' butonu ile POST /predict
+        endpoint'ine görsel gönderilmektedir.
+  \item \textbf{Sonuç Paneli:} Tahmin edilen sınıf etiketi, güven skoru ve
+        tüm 8 sınıf için olasılık dağılımını gösteren yatay bir
+        çubuk grafik (Chart.js) içermektedir.
+\end{enumerate}
+
+Modelin çıkarım süresi NVIDIA RTX 4070 Laptop GPU üzerinde görüntü başına
+yaklaşık 50--100 ms olmaktadır; bu değer etkileşimli kullanım için
+kabul edilebilir bir gecikme süresidir.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Tartışma ve Sonuç}
+
+Bu çalışmada, EfficientNet-B0 tabanlı transfer öğrenme ile sekiz sınıflı
+araba gövde tipi sınıflandırması başarıyla gerçekleştirilmiştir. Test
+kümesinde elde edilen \%93,54 doğruluk ve 0,9357 Macro F1 skoru, modelin
+görülmemiş verilere iyi bir genelleme yeteneğine sahip olduğunu
+göstermektedir.
+
+Veri toplama sürecinde CLIP tabanlı semantik filtre, veri kalitesini önemli
+ölçüde artırmış; alakasız görsellerin eğitim ve test kümelerine karışmasının
+önüne geçmiştir. Her sınıf için tam 800 kaliteli görsel sağlanması,
+sınıflar arası dengeyi korumuştur.
+
+Gelecek çalışmalar kapsamında şu iyileştirmeler değerlendirilebilir:
+\begin{itemize}
+  \item Hatchback sınıfına özgü ek veri toplama ile bu sınıftaki
+        performansın artırılması.
+  \item EfficientNet-B0'ın son birkaç bloğunun da ince ayar sürecine dahil
+        edilerek sınıfa özgü özellik öğreniminin güçlendirilmesi.
+  \item Test zamanı veri çoğaltma (Test Time Augmentation — TTA)
+        yöntemiyle tahmin kararlılığının artırılması.
+\end{itemize}
+
+Sonuç olarak bu proje, uygun büyüklükte ve kalitede bir veri seti ile
+transfer öğrenme yaklaşımının araba gövde tipi sınıflandırmasında
+güvenilir ve hızlı sonuçlar üretebileceğini ortaya koymaktadır.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
