@@ -1,35 +1,22 @@
-"""
-Tüm kaynaklardan görselleri data/raw/<SINIF>/ altına toplar.
-Kaynaklar:
-  - Cars_Body_Type (train+valid+test)
-  - stanford_cars_type (Wagon → STATION_WAGON)
-  - Formula One Cars (alt klasörler → F1)
-  - MICRO ve STATION_WAGON zaten data/raw/ altında
 
-Kullanım: python scripts/organize_data.py
-"""
 
 import os
 import shutil
 import random
 from pathlib import Path
 
-# ─── KAYNAKLAR ───────────────────────────────────────────────────────────────
 
 CARS_BODY_TYPE = Path(r"C:\Users\Barış\OneDrive\Masaüstü\Cars_Body_Type")
 STANFORD       = Path(r"C:\Users\Barış\OneDrive\Masaüstü\stanford_cars_type")
 F1_SOURCE      = Path(r"C:\Users\Barış\OneDrive\Masaüstü\Formula One Cars")
 RAW_DIR        = Path("data/raw")
 
-# Her sınıf için maksimum görsel sayısı (denge için)
 MAX_PER_CLASS  = 800
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
-# ─── YARDIMCI FONKSİYONLAR ───────────────────────────────────────────────────
 
 def copy_images(src_dir: Path, dest_dir: Path, label: str, existing_count: int, limit: int) -> int:
-    """src_dir içindeki görselleri dest_dir'e kopyalar, limit'i aşmaz."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     files = [f for f in src_dir.rglob("*") if f.suffix.lower() in IMG_EXTS and f.is_file()]
     random.shuffle(files)
@@ -54,8 +41,6 @@ def count_existing(dest_dir: Path) -> int:
     return len([f for f in dest_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
 
 
-# ─── ANA PROGRAM ─────────────────────────────────────────────────────────────
-
 def main():
     random.seed(42)
 
@@ -65,24 +50,20 @@ def main():
     print(f"Sınıf başı maksimum: {MAX_PER_CLASS}")
     print("=" * 60)
 
-    # ── 1. SUV ────────────────────────────────────────────────────────────────
     print("\n[SUV]")
     dest = RAW_DIR / "SUV"
     n = count_existing(dest)
     print(f"  Mevcut: {n}")
     if n < MAX_PER_CLASS:
-        # Cars_Body_Type (train+valid+test)
         for split in ["train", "valid", "test"]:
             src = CARS_BODY_TYPE / split / "SUV"
             if src.exists() and n < MAX_PER_CLASS:
                 n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
-        # Stanford
         src = STANFORD / "SUV"
         if src.exists() and n < MAX_PER_CLASS:
             n = copy_images(src, dest, "Stanford/SUV", n, MAX_PER_CLASS)
     print(f"  → TOPLAM SUV: {count_existing(dest)}")
 
-    # ── 2. SEDAN ──────────────────────────────────────────────────────────────
     print("\n[SEDAN]")
     dest = RAW_DIR / "SEDAN"
     n = count_existing(dest)
@@ -97,7 +78,6 @@ def main():
             n = copy_images(src, dest, "Stanford/Sedan", n, MAX_PER_CLASS)
     print(f"  → TOPLAM SEDAN: {count_existing(dest)}")
 
-    # ── 3. HATCHBACK ──────────────────────────────────────────────────────────
     print("\n[HATCHBACK]")
     dest = RAW_DIR / "HATCHBACK"
     n = count_existing(dest)
@@ -112,7 +92,6 @@ def main():
             n = copy_images(src, dest, "Stanford/Hatchback", n, MAX_PER_CLASS)
     print(f"  → TOPLAM HATCHBACK: {count_existing(dest)}")
 
-    # ── 4. PICKUP ─────────────────────────────────────────────────────────────
     print("\n[PICKUP]")
     dest = RAW_DIR / "PICKUP"
     n = count_existing(dest)
@@ -126,7 +105,6 @@ def main():
                     break
     print(f"  → TOPLAM PICKUP: {count_existing(dest)}")
 
-    # ── 5. VAN ────────────────────────────────────────────────────────────────
     print("\n[VAN]")
     dest = RAW_DIR / "VAN"
     n = count_existing(dest)
@@ -141,18 +119,15 @@ def main():
             n = copy_images(src, dest, "Stanford/Van", n, MAX_PER_CLASS)
     print(f"  → TOPLAM VAN: {count_existing(dest)}")
 
-    # ── 6. STATION_WAGON ──────────────────────────────────────────────────────
     print("\n[STATION_WAGON]")
     dest = RAW_DIR / "STATION_WAGON"
     n = count_existing(dest)
     print(f"  Mevcut (crawled): {n}")
-    # Stanford Wagon ekle
     src = STANFORD / "Wagon"
     if src.exists() and n < MAX_PER_CLASS:
         n = copy_images(src, dest, "Stanford/Wagon", n, MAX_PER_CLASS)
     print(f"  → TOPLAM STATION_WAGON: {count_existing(dest)}")
 
-    # ── 7. F1 ─────────────────────────────────────────────────────────────────
     print("\n[F1]")
     dest = RAW_DIR / "F1"
     n = count_existing(dest)
@@ -163,11 +138,9 @@ def main():
                 n = copy_images(team_dir, dest, team_dir.name, n, MAX_PER_CLASS)
     print(f"  → TOPLAM F1: {count_existing(dest)}")
 
-    # ── 8. MICRO (zaten var) ──────────────────────────────────────────────────
     micro_count = count_existing(RAW_DIR / "MICRO")
     print(f"\n[MICRO] Mevcut: {micro_count} (değiştirilmedi)")
 
-    # ── ÖZET ──────────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("ÖZET:")
     total = 0

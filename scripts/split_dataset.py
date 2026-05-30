@@ -1,18 +1,3 @@
-"""
-Veri setini train/val olarak böler.
-
-Kaggle'dan indirilen görselleri data/raw/ altına koyun.
-Script iki farklı yapıyı destekler:
-
-  Düz yapı:    data/raw/SUV/*.jpg, data/raw/VAN/*.jpg ...
-  İç içe yapı: data/raw/train/SUV/*.jpg, data/raw/val/SUV/*.jpg ... (Kaggle varsayılanı)
-
-Her iki durumda da tüm görseller toplanıp yeniden train/val olarak bölünür.
-
-Kullanım:
-    python scripts/split_dataset.py
-    python scripts/split_dataset.py --source data/raw --val_ratio 0.2 --seed 42
-"""
 
 import os
 import shutil
@@ -23,7 +8,6 @@ from pathlib import Path
 CLASSES = ['SUV', 'VAN', 'SEDAN', 'HATCHBACK', 'PICKUP', 'STATION_WAGON', 'MICRO', 'F1']
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
 
-# Kaggle sınıf adlarından bizim adlarımıza eşleme
 KAGGLE_NAME_MAP = {
     'suv': 'SUV',
     'van': 'VAN',
@@ -46,13 +30,11 @@ KAGGLE_NAME_MAP = {
 
 
 def collect_images(source_dir: Path) -> dict[str, list[Path]]:
-    """Klasörlerden sınıf bazında tüm görsel yollarını toplar."""
     collected: dict[str, list[Path]] = {cls: [] for cls in CLASSES}
 
     for item in source_dir.rglob('*'):
         if item.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
-        # Klasör adını normalize et
         folder = item.parent.name.lower().strip()
         mapped = KAGGLE_NAME_MAP.get(folder)
         if mapped:
@@ -67,7 +49,6 @@ def split_dataset(source_dir: Path, val_ratio: float = 0.15, test_ratio: float =
     val_dir = source_dir.parent / 'val'
     test_dir = source_dir.parent / 'test'
 
-    # Eski train/val/test klasörlerini tamamen temizle
     for d in [train_dir, val_dir, test_dir]:
         if d.exists():
             shutil.rmtree(d)
@@ -116,12 +97,10 @@ def split_dataset(source_dir: Path, val_ratio: float = 0.15, test_ratio: float =
     print(f"  Val   → {val_dir}")
     print(f"  Test  → {test_dir}")
 
-    # Eksik sınıflar varsa uyar
     missing = [cls for cls in CLASSES if not collected[cls]]
     if missing:
         print(f"\n  [UYARI] Eksik sınıflar: {', '.join(missing)}")
-        print("  Bu sınıflar için ek görsel toplamanız gerekiyor.")
-
+        print("  Bu sınıflar için ek görsel toplamanız gerekiyor.\n")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Veri setini train/val/test olarak böler.')

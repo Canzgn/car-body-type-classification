@@ -1,17 +1,4 @@
-# =============================================================================
-# ARABA GÖVDE TİPİ SINIFLANDIRMA — TAHMİN SCRİPTİ
-# Kocaeli Üniversitesi, Yazılım Laboratuvarı II, Proje III
-#
-# Bu dosya PredictionScript.txt olarak kaydedilerek best_model.pth ile
-# birlikte teslim klasörüne eklenmelidir.
-#
-# Colab'da çalıştırma adımları:
-#   1. Zip dosyasını /content/ altına yükle ve aç
-#   2. best_model.pth dosyasının yolunu MODEL_PATH değişkeninde güncelle
-#   3. Aşağıdaki kodu çalıştır:
-#        from predict_submission import Predict
-#        Predict("/content/testdata")
-# =============================================================================
+
 
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install",
@@ -25,29 +12,21 @@ import torch.nn.functional as F
 from torchvision import transforms, models
 from PIL import Image
 
-# ── Sınıf numarası eşleme ─────────────────────────────────────────────────────
-# Test.txt'teki sınıf sıralama:
-# 1=SUV, 2=VAN, 3=STATION WAGON, 4=MİCRO, 5=AÇIK TEKERLEKLİ, 6=SEDAN,
-# 7=HATCHBACK, 8=PICK UP
-#
-# Modelimizin alfabetik sıralaması (ImageFolder):
-# 0=F1, 1=HATCHBACK, 2=MICRO, 3=PICKUP, 4=SEDAN, 5=STATION_WAGON, 6=SUV, 7=VAN
 
 MODEL_IDX_TO_CLASS_NUM = {
-    0: 5,  # F1          → AÇIK TEKERLEKLİ
-    1: 7,  # HATCHBACK   → HATCHBACK
-    2: 4,  # MICRO       → MİCRO
-    3: 8,  # PICKUP      → PICK UP
-    4: 6,  # SEDAN       → SEDAN
-    5: 3,  # STATION_WAGON → STATION WAGON
-    6: 1,  # SUV         → SUV
-    7: 2,  # VAN         → VAN
+    0: 5,
+    1: 7,
+    2: 4,
+    3: 8,
+    4: 6,
+    5: 3,
+    6: 1,
+    7: 2,
 }
 
 IMG_SIZE   = 224
 NUM_CLASSES = 8
 
-# Colab'da modelin konumu — zip içindeki yola göre güncelle
 MODEL_PATH = "/content/best_model.pth"
 
 transform = transforms.Compose([
@@ -62,7 +41,6 @@ _model = None
 
 
 def _get_model():
-    """Modeli bir kez yükle, sonraki çağrılarda önbellekten döndür."""
     global _model
     if _model is None:
         model = models.efficientnet_b0(weights=None)
@@ -79,22 +57,6 @@ def _get_model():
 
 
 def Predict(file_path):
-    """
-    file_path : testdata/ klasörünün dosya yolu
-    Klasör yapısı:
-        testdata/
-          1/  ← SUV
-          2/  ← VAN
-          3/  ← STATION WAGON
-          4/  ← MİCRO
-          5/  ← AÇIK TEKERLEKLİ
-          6/  ← SEDAN
-          7/  ← HATCHBACK
-          8/  ← PICK UP
-
-    Çıktı: /content/Preds.txt
-    Format: {dosya_adı} | Pred: {sınıf_numarası}
-    """
     model = _get_model()
 
     image_names = []
@@ -127,14 +89,11 @@ def Predict(file_path):
             except Exception as e:
                 print(f"[HATA] {fname}: {e}")
 
-    # Sonuçları Preds.txt'e yaz
-    filename = f"/content/Preds.txt"
+    filename = "/content/Preds.txt"
     f = open(filename, "w", encoding="utf-8")
 
     for i in range(len(preds)):
-        line = (
-            f"{image_names[i]} | Pred: {preds[i]}"
-        )
+        line = f"{image_names[i]} | Pred: {preds[i]}"
         print(line)
         f.write(line + "\n")
 
