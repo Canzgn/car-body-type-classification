@@ -1,17 +1,4 @@
-"""
-EfficientNet-B0 Transfer Learning ile Araba Gövde Tipi Sınıflandırma.
 
-Veri yapısı:
-    data/train/<SINIF>/*.jpg
-    data/val/<SINIF>/*.jpg
-
-Çıktılar:
-    models/best_model.pth          — En iyi model ağırlıkları
-    outputs/training_history.json  — Epoch bazlı loss/accuracy
-
-Kullanım:
-    python scripts/train.py
-"""
 
 import os
 import json
@@ -25,20 +12,18 @@ from torchvision import datasets, transforms, models
 from tqdm import tqdm
 
 
-# ── Konfigürasyon ─────────────────────────────────────────────────────────────
 NUM_CLASSES = 8
 IMG_SIZE    = 224
 BATCH_SIZE  = 32
 EPOCHS      = 50
 LR          = 1e-4
 WEIGHT_DECAY = 1e-4
-PATIENCE    = 7   # Early stopping sabır değeri
+PATIENCE    = 7  
 
 DATA_DIR    = Path('data')
 MODEL_DIR   = Path('models')
 OUTPUT_DIR  = Path('outputs')
 
-# Türkçe görüntüleme etiketleri
 CLASS_LABELS = {
     'F1':            'Açık Tekerlekli (F1)',
     'HATCHBACK':     'Hatchback',
@@ -112,13 +97,11 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
 
-    # ── Veri Setleri ──────────────────────────────────────────────────────────
     train_tf, val_tf = build_transforms()
 
     train_dataset = datasets.ImageFolder(DATA_DIR / 'train', transform=train_tf)
     val_dataset   = datasets.ImageFolder(DATA_DIR / 'val',   transform=val_tf)
 
-    # Windows'ta num_workers>0 sorun çıkarabilir; güvenli değer: 0
     num_workers = 0 if os.name == 'nt' else 4
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True,
@@ -129,7 +112,6 @@ def main():
     print(f'Train: {len(train_dataset)} görsel | Val: {len(val_dataset)} görsel')
     print(f'Sınıf eşlemesi: {train_dataset.class_to_idx}')
 
-    # ── Model ─────────────────────────────────────────────────────────────────
     model = build_model(NUM_CLASSES).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -138,7 +120,6 @@ def main():
         optimizer, mode='min', patience=3, factor=0.5
     )
 
-    # ── Eğitim Döngüsü ────────────────────────────────────────────────────────
     history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
     best_val_loss = float('inf')
     epochs_no_improve = 0
@@ -159,7 +140,6 @@ def main():
 
         scheduler.step(val_loss)
 
-        # Model checkpoint
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
@@ -179,7 +159,6 @@ def main():
                 print(f'\nEarly stopping! {PATIENCE} epoch boyunca iyileşme olmadı.')
                 break
 
-    # Eğitim geçmişini kaydet
     history_path = OUTPUT_DIR / 'training_history.json'
     with open(history_path, 'w') as f:
         json.dump(history, f, indent=2)

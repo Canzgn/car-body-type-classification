@@ -1,15 +1,4 @@
-"""
-Eğitilmiş modelin değerlendirilmesi.
 
-Accuracy, Precision, Recall, F1-Score (per-class + macro/weighted) hesaplar.
-Üç grafik üretir:
-  outputs/training_curves.png   — Loss & Accuracy (epoch bazlı)
-  outputs/confusion_matrix.png  — 8x8 Normalized Confusion Matrix
-  outputs/metrics_report.txt    — Sınıflandırma raporu
-
-Kullanım:
-    python scripts/evaluate.py
-"""
 
 import json
 from pathlib import Path
@@ -25,7 +14,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 
 
-# ── Konfigürasyon ─────────────────────────────────────────────────────────────
 NUM_CLASSES = 8
 IMG_SIZE    = 224
 BATCH_SIZE  = 32
@@ -34,7 +22,6 @@ DATA_DIR   = Path('data')
 MODEL_DIR  = Path('models')
 OUTPUT_DIR = Path('outputs')
 
-# ImageFolder alfabetik sıralama ile eşleşmeli
 CLASS_NAMES = ['F1', 'HATCHBACK', 'MICRO', 'PICKUP', 'SEDAN', 'STATION_WAGON', 'SUV', 'VAN']
 CLASS_LABELS = {
     'F1':            'Açık Tekerlekli',
@@ -75,7 +62,6 @@ def plot_training_curves(history: dict, save_path: Path):
     epochs = range(1, len(history['train_loss']) + 1)
     save_dir = save_path.parent
 
-    # ── Loss grafiği (ayrı dosya) ─────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(5, 3.2))
     ax.plot(epochs, history['train_loss'], color='#e74c3c', linewidth=2, label='Training Loss')
     ax.plot(epochs, history['val_loss'],   color='#3498db', linewidth=2, label='Validation Loss')
@@ -88,7 +74,6 @@ def plot_training_curves(history: dict, save_path: Path):
     plt.savefig(save_dir / 'training_loss.png', dpi=150, bbox_inches='tight')
     plt.close()
 
-    # ── Accuracy grafiği (ayrı dosya) ─────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(5, 3.2))
     ax.plot(epochs, [a * 100 for a in history['train_acc']], color='#e74c3c', linewidth=2, label='Training Accuracy')
     ax.plot(epochs, [a * 100 for a in history['val_acc']],   color='#3498db', linewidth=2, label='Validation Accuracy')
@@ -148,7 +133,6 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-    # Test seti varsa onu kullan (gerçek değerlendirme), yoksa val setine geri dön
     eval_dir = DATA_DIR / 'test' if (DATA_DIR / 'test').exists() else DATA_DIR / 'val'
     eval_label = 'TEST' if eval_dir.name == 'test' else 'VAL'
     print(f'Değerlendirme seti: {eval_dir} ({eval_label})')
@@ -160,7 +144,6 @@ def main():
 
     y_true, y_pred = get_predictions(model, eval_loader, device)
 
-    # ── Metrikleri yazdır ve kaydet ───────────────────────────────────────────
     report = classification_report(y_true, y_pred, target_names=DISPLAY_NAMES, digits=4)
     print('\n=== Sınıflandırma Raporu ===')
     print(report)
@@ -170,7 +153,6 @@ def main():
         f.write(report)
     print(f'Rapor kaydedildi: {report_path}')
 
-    # ── Grafikler ─────────────────────────────────────────────────────────────
     plot_confusion_matrix(y_true, y_pred, OUTPUT_DIR / 'confusion_matrix.png')
 
     history_path = OUTPUT_DIR / 'training_history.json'

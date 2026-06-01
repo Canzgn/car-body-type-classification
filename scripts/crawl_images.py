@@ -1,9 +1,3 @@
-"""
-Eksik sınıflar için DuckDuckGo'dan görsel toplar.
-Kullanım: python scripts/crawl_images.py
-
-region='us-en' kullanarak Türkçe locale sorununu önler.
-"""
 
 import os
 import time
@@ -12,13 +6,10 @@ from io import BytesIO
 from PIL import Image
 from ddgs import DDGS
 
-# Hedef klasör
 BASE_DIR = "data/raw"
 
-# ─── ARAMA TERİMLERİ ─────────────────────────────────────────────────────────
-# Sadece MICRO — 483 mevcut, 800'e tamamlanacak
+
 MICRO_KEYWORDS = [
-    # Önceki turda indirilmeyenler / ek modeller
     "Seat Mii city car exterior side view",
     "Skoda Citigo city car exterior",
     "Kia Picanto 2013 city car exterior",
@@ -37,7 +28,6 @@ MICRO_KEYWORDS = [
 
 MICRO_TARGET = 800
 
-# ─── INDIRME FONKSİYONU ───────────────────────────────────────────────────────
 
 HEADERS = {
     "User-Agent": (
@@ -59,12 +49,10 @@ def download_url(url: str, dest_path: str) -> bool:
         content_type = resp.headers.get("Content-Type", "")
         if "image" not in content_type or "svg" in content_type:
             return False
-        # Boyut kontrolü — PDF içi küçük görselleri ve ikonları at
         img = Image.open(BytesIO(resp.content))
         w, h = img.size
         if w < MIN_WIDTH or h < MIN_HEIGHT:
             return False
-        # PNG'yi JPEG'e dönüştür (küçük dosya boyutu)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
         img.save(dest_path, "JPEG", quality=90)
@@ -78,13 +66,11 @@ def crawl_class(class_name: str, keywords: list[str], num_per_keyword: int = 80,
     save_dir = os.path.join(BASE_DIR, class_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Mevcut dosya sayısını başlangıç offset'i olarak kullan
     existing = len([f for f in os.listdir(save_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
     counter = existing
     print(f"[{class_name}] Mevcut: {existing} görsel, hedef: {target or 'sınırsız'}")
 
     for keyword in keywords:
-        # Hedefe ulaştıysa dur
         if target and counter >= target:
             print(f"[{class_name}] Hedefe ulaşıldı ({counter}/{target}), durduruluyor.")
             break
@@ -99,11 +85,11 @@ def crawl_class(class_name: str, keywords: list[str], num_per_keyword: int = 80,
                     keyword,
                     region="us-en",
                     safesearch="off",
-                    type_image="photo",   # sadece fotoğraf — PDF/çizim/ikon yok
-                    size="Medium",        # küçük ikonları ele
+                    type_image="photo",   
+                    size="Medium",       
                     max_results=istek,
                 ))
-            time.sleep(2)  # rate limit önlemi
+            time.sleep(2)  
         except Exception as e:
             print(f"  DDG hatası: {e}")
             time.sleep(5)
@@ -127,7 +113,6 @@ def crawl_class(class_name: str, keywords: list[str], num_per_keyword: int = 80,
     print(f"\n[{class_name}] Toplam {total} görsel → {save_dir}")
 
 
-# ─── ANA PROGRAM ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("=" * 60)

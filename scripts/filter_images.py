@@ -1,14 +1,3 @@
-"""
-CLIP tabanlı görsel kalite filtresi.
-
-Her sınıf klasöründeki görselleri CLIP modeliyle değerlendirir:
-- "Bu görsel [SINIF] arabası mı?" sorusuna düşük puan alanlar silinir.
-- Silinen görsellerin yerine yenisi çekilir.
-
-Kullanım:
-    python scripts/filter_images.py            # analiz + sil + yeniden indir
-    python scripts/filter_images.py --dry-run  # sadece raporla, silme
-"""
 
 import os
 import argparse
@@ -21,14 +10,11 @@ import requests
 from io import BytesIO
 from ddgs import DDGS
 
-# ─── AYARLAR ─────────────────────────────────────────────────────────────────
-
 RAW_DIR   = Path("data/raw")
 IMG_EXTS  = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-THRESHOLD = 0.22   # Bu değerin altındaki görseller silinir (0-1 arası)
-TARGET    = 800    # Her sınıf için hedef görsel sayısı
+THRESHOLD = 0.22   
+TARGET    = 800    
 
-# Her sınıf için CLIP pozitif prompt'ları
 CLASS_PROMPTS = {
     "F1": [
         "a formula one racing car on track",
@@ -72,7 +58,6 @@ CLASS_PROMPTS = {
     ],
 }
 
-# Yeniden indirme için arama terimleri (sınıf başına)
 REFILL_KEYWORDS = {
     "F1": [
         "Red Bull Racing RB19 formula one car exterior",
@@ -132,9 +117,6 @@ HEADERS = {
 }
 MIN_W, MIN_H = 200, 150
 
-
-# ─── CLIP YÜKLEMESİ ──────────────────────────────────────────────────────────
-
 def load_clip():
     print("CLIP modeli yükleniyor (ViT-B/32)...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -146,8 +128,6 @@ def load_clip():
     print(f"  Cihaz: {device}")
     return model, preprocess, tokenizer, device
 
-
-# ─── GÖRSEL SKORLAMA ─────────────────────────────────────────────────────────
 
 def score_images_batch(files: list[Path], text_features, preprocess, model,
                         device, batch_size: int = 64) -> list[float]:
@@ -189,7 +169,6 @@ def encode_prompts(prompts: list[str], tokenizer, model, device):
     return feats
 
 
-# ─── YENİDEN İNDİRME ─────────────────────────────────────────────────────────
 
 def download_url(url: str, dest: Path) -> bool:
     try:
@@ -209,7 +188,6 @@ def download_url(url: str, dest: Path) -> bool:
 
 
 def refill_class(class_name: str, save_dir: Path, needed: int):
-    """Silinen görsellerin yerine DuckDuckGo'dan yenilerini indirir."""
     if needed <= 0:
         return
     print(f"  ↺ {needed} yeni görsel indiriliyor...")
@@ -246,7 +224,6 @@ def refill_class(class_name: str, save_dir: Path, needed: int):
     print(f"  ✓ {added} yeni görsel eklendi")
 
 
-# ─── ANA FİLTRE ──────────────────────────────────────────────────────────────
 
 def filter_class(class_name: str, model, preprocess, tokenizer, device,
                  threshold: float, dry_run: bool):
@@ -287,7 +264,6 @@ def filter_class(class_name: str, model, preprocess, tokenizer, device,
         refill_class(class_name, save_dir, deleted)
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()

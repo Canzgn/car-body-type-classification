@@ -48,3 +48,8 @@ outputs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Submission artifacts
+230201057_proje.zip
+230201057.zip
+testdata_sample/

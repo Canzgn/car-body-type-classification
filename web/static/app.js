@@ -1,4 +1,3 @@
-/* app.js — Araba Gövde Tipi Sınıflandırıcı Frontend */
 
 const dropZone      = document.getElementById('dropZone');
 const fileInput     = document.getElementById('fileInput');
@@ -16,7 +15,6 @@ const errorMsg      = document.getElementById('errorMsg');
 let currentFile = null;
 let barChart    = null;
 
-// ── Drop Zone ──────────────────────────────────────────────────────────────
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
 
@@ -33,7 +31,6 @@ fileInput.addEventListener('change', e => {
   if (e.target.files[0]) handleFile(e.target.files[0]);
 });
 
-// ── Dosya İşle ────────────────────────────────────────────────────────────
 function handleFile(file) {
   currentFile = file;
   const reader = new FileReader();
@@ -47,7 +44,6 @@ function handleFile(file) {
   reader.readAsDataURL(file);
 }
 
-// ── Sıfırla ───────────────────────────────────────────────────────────────
 resetBtn.addEventListener('click', reset);
 
 function reset() {
@@ -60,7 +56,6 @@ function reset() {
   if (barChart) { barChart.destroy(); barChart = null; }
 }
 
-// ── Tahmin Yap ────────────────────────────────────────────────────────────
 predictBtn.addEventListener('click', async () => {
   if (!currentFile) return;
 
@@ -87,7 +82,6 @@ predictBtn.addEventListener('click', async () => {
   }
 });
 
-// ── Sonuçları Göster ──────────────────────────────────────────────────────
 function showResults(data) {
   resultClass.textContent = data.prediction;
   resultConf.textContent  = `Güven: ${data.confidence_percent}`;
@@ -136,7 +130,6 @@ function showResults(data) {
   });
 }
 
-// ── Yardımcı ──────────────────────────────────────────────────────────────
 function setLoading(on) {
   predictBtn.disabled         = on;
   btnText.style.display       = on ? 'none'         : 'inline';
