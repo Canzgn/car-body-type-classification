@@ -1,15 +1,3 @@
-"""
-FastAPI — Araba Gövde Tipi Sınıflandırıcı Backend
-
-Çalıştır:
-    uvicorn web.main:app --reload --host 0.0.0.0 --port 8000
-
-Endpoint'ler:
-    GET  /          → Arayüz (index.html)
-    GET  /health    → Model durumu
-    POST /predict   → Görüntü yükle, tahmin al
-    GET  /docs      → Swagger UI (otomatik)
-"""
 
 import io
 from pathlib import Path
@@ -25,13 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# ── Konfigürasyon ─────────────────────────────────────────────────────────────
 MODEL_PATH  = Path('models/best_model.pth')
 STATIC_DIR  = Path('web/static')
 IMG_SIZE    = 224
 NUM_CLASSES = 8
 
-# ImageFolder alfabetik sıralama ile aynı sıra olmalı
 CLASS_NAMES = ['F1', 'HATCHBACK', 'MICRO', 'PICKUP', 'SEDAN', 'STATION_WAGON', 'SUV', 'VAN']
 CLASS_LABELS = {
     'F1':            'Açık Tekerlekli (F1)',
@@ -46,7 +32,6 @@ CLASS_LABELS = {
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# ── Model Yükle ───────────────────────────────────────────────────────────────
 def load_model():
     if not MODEL_PATH.exists():
         return None
@@ -61,14 +46,12 @@ def load_model():
 
 model = load_model()
 
-# ── Görüntü Dönüşümü ──────────────────────────────────────────────────────────
 transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
-# ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(
     title='Araba Gövde Tipi Sınıflandırıcı',
     description='EfficientNet-B0 ile 8 farklı araba gövde tipi sınıflandırması — Kocaeli Üniversitesi',

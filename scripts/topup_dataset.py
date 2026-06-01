@@ -1,17 +1,4 @@
-"""
-Veri seti tamamlama scripti.
 
-1. STATION_WAGON klasörünü CLIP ile filtreler (kötü görselleri siler).
-2. Tüm sınıfları 800 görsele tamamlar:
-   - Masaüstü kaynaklarında görsel olan sınıflar: Desktop'tan çeker.
-   - MICRO: DuckDuckGo'dan indirir.
-3. Yeni eklenen görselleri CLIP ile doğrular; skoru düşük olanları siler,
-   yerine Desktop/DuckDuckGo'dan yenisini ekler.
-
-Kullanım:
-    python scripts/topup_dataset.py
-    python scripts/topup_dataset.py --dry-run   (sadece rapor, silme/ekleme yok)
-"""
 
 import os
 import shutil
@@ -27,7 +14,6 @@ import requests
 from io import BytesIO
 from ddgs import DDGS
 
-# ─── AYARLAR ─────────────────────────────────────────────────────────────────
 
 RAW_DIR   = Path("data/raw")
 IMG_EXTS  = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -36,7 +22,6 @@ THRESHOLD = 0.25
 
 DESKTOP = Path(r"C:\Users\Barış\OneDrive\Masaüstü")
 
-# CLIP prompts (her sınıf için)
 CLASS_PROMPTS = {
     "F1": [
         "a formula one racing car on track",
@@ -80,7 +65,6 @@ CLASS_PROMPTS = {
     ],
 }
 
-# Desktop kaynak klasörleri — her sınıf için arama yapılacak dizinler
 DESKTOP_SOURCES = {
     "F1": [
         DESKTOP / "Formula One Cars",
@@ -119,7 +103,6 @@ DESKTOP_SOURCES = {
     ],
 }
 
-# DuckDuckGo terimleri (sınıf bazlı)
 DDG_KEYWORDS = {}
 
 MICRO_KEYWORDS = [
@@ -159,7 +142,6 @@ STATION_WAGON_KEYWORDS = [
 DDG_KEYWORDS["MICRO"] = MICRO_KEYWORDS
 DDG_KEYWORDS["STATION_WAGON"] = STATION_WAGON_KEYWORDS
 
-# STATION_WAGON CLIP prompts (filter için)
 SW_PROMPTS = [
     "a station wagon estate car exterior",
     "an estate car side view exterior",
@@ -175,7 +157,6 @@ HEADERS = {
 MIN_W, MIN_H = 200, 150
 
 
-# ─── CLIP ─────────────────────────────────────────────────────────────────────
 
 def load_clip():
     print("CLIP modeli yükleniyor (ViT-B/32)...")
@@ -225,7 +206,6 @@ def score_images_batch(files, text_features, preprocess, model, device, batch_si
     return scores
 
 
-# ─── HASH DEDÜPLİKASYON ──────────────────────────────────────────────────────
 
 def file_hash(path: Path) -> str:
     h = hashlib.md5()
@@ -247,7 +227,6 @@ def build_existing_hashes(raw_class_dir: Path) -> set:
     return hashes
 
 
-# ─── GÖRSEL EKLEME ────────────────────────────────────────────────────────────
 
 def next_filename(raw_class_dir: Path) -> Path:
     """data/raw/<CLASS>/ içinde boş bir 6 haneli dosya adı döndür."""
@@ -265,7 +244,6 @@ def copy_from_desktop(class_name: str, raw_class_dir: Path,
     if not sources:
         return 0
 
-    # Desktop'taki tüm görselleri topla
     candidates = []
     for src_dir in sources:
         if src_dir.exists():
@@ -310,7 +288,6 @@ def copy_from_desktop(class_name: str, raw_class_dir: Path,
 
 def download_ddg(class_name: str, raw_class_dir: Path,
                   needed: int, existing_hashes: set, dry_run: bool) -> int:
-    """DuckDuckGo'dan görsel indirir. Eklenen sayıyı döndürür."""
     keywords = DDG_KEYWORDS.get(class_name, MICRO_KEYWORDS)
     if dry_run:
         print(f"    [DRY-RUN] {needed} görsel indirilecek ({class_name})")
@@ -361,7 +338,6 @@ def download_ddg(class_name: str, raw_class_dir: Path,
     return added
 
 
-# ─── ANA MANTIĞI ──────────────────────────────────────────────────────────────
 
 def process_class(class_name: str, model, preprocess, tokenizer, device,
                    threshold: float, dry_run: bool):
@@ -375,7 +351,6 @@ def process_class(class_name: str, model, preprocess, tokenizer, device,
     prompts = CLASS_PROMPTS.get(class_name, SW_PROMPTS)
     text_features = encode_prompts(prompts, tokenizer, model, device)
 
-    # ── 1. CLIP filtresi ──────────────────────────────────────────────────────
     print(f"  CLIP filtresi uygulanıyor ({threshold})...")
     scores = score_images_batch(files, text_features, preprocess, model, device)
     low = [(s, f) for s, f in zip(scores, files) if s < threshold]
@@ -403,7 +378,6 @@ def process_class(class_name: str, model, preprocess, tokenizer, device,
         print(f"  ✓ {class_name} zaten {TARGET}+ görsele sahip")
         return
 
-    # ── 2. Eksik görselleri tamamla ───────────────────────────────────────────
     existing_hashes = build_existing_hashes(raw_class_dir)
 
     if class_name == "MICRO":
@@ -420,9 +394,7 @@ def process_class(class_name: str, model, preprocess, tokenizer, device,
 
     print(f"  ✓ {added} yeni görsel eklendi (hedef: {needed})")
 
-    # ── 3. Yeni görselleri CLIP ile doğrula ───────────────────────────────────
     if not dry_run and added > 0:
-        # Sadece yeni eklenen görselleri al (en son eklenenler)
         all_files = sorted([f for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
         new_files = all_files[after_filter:]  # filtreden sonra eklenenlerin sırası
         if not new_files:
@@ -442,7 +414,6 @@ def process_class(class_name: str, model, preprocess, tokenizer, device,
         else:
             print(f"  ✓ Tüm yeni görseller kalite testini geçti")
 
-    # Son sayı
     final = len([f for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
     print(f"  → Sonuç: {final} görsel")
 
@@ -455,7 +426,6 @@ def main():
 
     model, preprocess, tokenizer, device = load_clip()
 
-    # İşlenecek sınıflar — STATION_WAGON dahil tümü
     classes = ["STATION_WAGON", "F1", "HATCHBACK", "MICRO", "PICKUP", "SEDAN", "SUV", "VAN"]
 
     print(f"Eşik: {args.threshold} | Dry-run: {args.dry_run}")

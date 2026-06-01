@@ -1,0 +1,2178 @@
+===============================================================================
+FILE: scripts/crawl_images.py
+===============================================================================
+import os
+import time
+import requests
+from io import BytesIO
+from PIL import Image
+from ddgs import DDGS
+
+              
+BASE_DIR = "data/raw"
+
+                                                                               
+                                               
+MICRO_KEYWORDS = [
+                                                
+    "Seat Mii city car exterior side view",
+    "Skoda Citigo city car exterior",
+    "Kia Picanto 2013 city car exterior",
+    "Hyundai i10 2012 city car exterior",
+    "Peugeot 107 city car exterior side",
+    "Toyota Aygo 2010 city car exterior",
+    "Mitsubishi Mirage city car exterior",
+    "Mazda Carol kei car exterior",
+    "Suzuki Cervo kei car exterior",
+    "Subaru R1 kei car exterior",
+    "Nissan Pixo city car exterior",
+    "Honda Life kei car exterior",
+    "Daihatsu Move kei car exterior",
+    "Suzuki Wagon R kei car exterior",
+]
+
+MICRO_TARGET = 800
+
+                                                                                
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+MIN_WIDTH  = 200
+MIN_HEIGHT = 150
+
+def download_url(url: str, dest_path: str) -> bool:
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        if resp.status_code != 200:
+            return False
+        content_type = resp.headers.get("Content-Type", "")
+        if "image" not in content_type or "svg" in content_type:
+            return False
+                                                                  
+        img = Image.open(BytesIO(resp.content))
+        w, h = img.size
+        if w < MIN_WIDTH or h < MIN_HEIGHT:
+            return False
+                                                     
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(dest_path, "JPEG", quality=90)
+        return True
+    except Exception:
+        pass
+    return False
+
+def crawl_class(class_name: str, keywords: list[str], num_per_keyword: int = 80, target: int = None):
+    save_dir = os.path.join(BASE_DIR, class_name)
+    os.makedirs(save_dir, exist_ok=True)
+
+                                                            
+    existing = len([f for f in os.listdir(save_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
+    counter = existing
+    print(f"[{class_name}] Mevcut: {existing} görsel, hedef: {target or 'sınırsız'}")
+
+    for keyword in keywords:
+                              
+        if target and counter >= target:
+            print(f"[{class_name}] Hedefe ulaşıldı ({counter}/{target}), durduruluyor.")
+            break
+
+        kalan = (target - counter) if target else num_per_keyword
+        istek = min(num_per_keyword, kalan)
+
+        print(f"\n[{class_name}] Arıyor: '{keyword}' ({istek} adet)")
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.images(
+                    keyword,
+                    region="us-en",
+                    safesearch="off",
+                    type_image="photo",                                         
+                    size="Medium",                            
+                    max_results=istek,
+                ))
+            time.sleep(2)                     
+        except Exception as e:
+            print(f"  DDG hatası: {e}")
+            time.sleep(5)
+            continue
+
+        downloaded_this = 0
+        for item in results:
+            if target and counter >= target:
+                break
+            url = item.get("image", "")
+            if not url:
+                continue
+            dest = os.path.join(save_dir, f"{counter:06d}.jpg")
+            if download_url(url, dest):
+                counter += 1
+                downloaded_this += 1
+
+        print(f"  {downloaded_this} görsel indirildi")
+
+    total = len([f for f in os.listdir(save_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
+    print(f"\n[{class_name}] Toplam {total} görsel → {save_dir}")
+
+                                                                               
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("MICRO → 800 görsele tamamlanıyor...")
+    print("Hedef klasör:", os.path.abspath(BASE_DIR))
+    print("=" * 60)
+
+    crawl_class("MICRO", MICRO_KEYWORDS, num_per_keyword=50, target=MICRO_TARGET)
+
+    print("\n" + "=" * 60)
+    micro_count = len([f for f in os.listdir(os.path.join(BASE_DIR, 'MICRO')) if f.lower().endswith(('.jpg','.jpeg','.png'))]) if os.path.exists(os.path.join(BASE_DIR,'MICRO')) else 0
+    print(f"  MICRO: {micro_count} görsel")
+    print("=" * 60)
+    print("\nSONRAKİ ADIM: Görselleri gözden geçir, kalitesizleri sil,")
+    print("sonra split_dataset.py'yi çalıştır.")
+
+===============================================================================
+FILE: scripts/filter_images.py
+===============================================================================
+import os
+import argparse
+import torch
+import open_clip
+from PIL import Image
+from pathlib import Path
+import time
+import requests
+from io import BytesIO
+from ddgs import DDGS
+
+                                                                               
+
+RAW_DIR   = Path("data/raw")
+IMG_EXTS  = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+THRESHOLD = 0.22                                                       
+TARGET    = 800                                        
+
+                                         
+CLASS_PROMPTS = {
+    "F1": [
+        "a formula one racing car on track",
+        "an open wheel racing car exterior",
+        "a formula 1 car side view",
+    ],
+    "HATCHBACK": [
+        "a hatchback car exterior side view",
+        "a 3 door hatchback automobile exterior",
+        "a 5 door hatchback car photo",
+    ],
+    "MICRO": [
+        "a microcar city car exterior side view",
+        "a small miniature city car exterior",
+        "a kei car small automobile exterior",
+    ],
+    "PICKUP": [
+        "a pickup truck exterior side view",
+        "a pickup truck with cargo bed",
+        "a truck pickup automobile exterior",
+    ],
+    "SEDAN": [
+        "a sedan car exterior side view",
+        "a 4 door sedan automobile exterior",
+        "a sedan car photo",
+    ],
+    "STATION_WAGON": [
+        "a station wagon estate car exterior",
+        "an estate car side view exterior",
+        "a touring wagon car exterior",
+    ],
+    "SUV": [
+        "an SUV sport utility vehicle exterior",
+        "a sport utility vehicle side view",
+        "an SUV car exterior photo",
+    ],
+    "VAN": [
+        "a van vehicle exterior side view",
+        "a minivan cargo van exterior",
+        "a van automobile exterior photo",
+    ],
+}
+
+                                                     
+REFILL_KEYWORDS = {
+    "F1": [
+        "Red Bull Racing RB19 formula one car exterior",
+        "Ferrari SF-23 formula one car exterior",
+        "Mercedes W14 formula one car side view",
+        "McLaren MCL60 formula one car exterior",
+    ],
+    "HATCHBACK": [
+        "Volkswagen Golf Mk7 hatchback exterior side",
+        "Ford Focus Mk3 hatchback exterior side",
+        "Toyota Corolla hatchback exterior side view",
+        "Honda Civic hatchback exterior side view",
+    ],
+    "MICRO": [
+        "Seat Mii city car exterior side view",
+        "Skoda Citigo city car exterior side",
+        "Kia Picanto city car exterior photo",
+        "Hyundai i10 city car exterior photo",
+    ],
+    "PICKUP": [
+        "Toyota Hilux pickup truck exterior side",
+        "Ford Ranger pickup truck exterior side",
+        "Chevrolet Colorado pickup truck exterior",
+        "Nissan Navara pickup truck exterior side",
+    ],
+    "SEDAN": [
+        "Toyota Camry sedan exterior side view",
+        "Honda Accord sedan exterior side view",
+        "BMW 3 Series sedan exterior side view",
+        "Mercedes C-Class sedan exterior side",
+    ],
+    "STATION_WAGON": [
+        "BMW 3 Series Touring wagon exterior",
+        "Audi A4 Avant wagon exterior photo",
+        "Volvo V60 estate car exterior side",
+        "Skoda Octavia Combi estate exterior",
+    ],
+    "SUV": [
+        "Toyota RAV4 SUV exterior side view",
+        "Honda CR-V SUV exterior side view",
+        "BMW X3 SUV exterior side view photo",
+        "Ford Escape SUV exterior side view",
+    ],
+    "VAN": [
+        "Volkswagen Transporter T6 van exterior",
+        "Ford Transit van exterior side view",
+        "Mercedes Sprinter van exterior side",
+        "Renault Trafic van exterior side view",
+    ],
+}
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+MIN_W, MIN_H = 200, 150
+
+                                                                               
+
+def load_clip():
+    print("CLIP modeli yükleniyor (ViT-B/32)...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        "ViT-B-32", pretrained="openai"
+    )
+    model = model.to(device).eval()
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    print(f"  Cihaz: {device}")
+    return model, preprocess, tokenizer, device
+
+                                                                               
+
+def score_images_batch(files: list[Path], text_features, preprocess, model,
+                        device, batch_size: int = 64) -> list[float]:
+                                                                     
+    from tqdm import tqdm
+    scores = []
+    for i in tqdm(range(0, len(files), batch_size), desc="  Analiz", ncols=70):
+        batch_files = files[i:i + batch_size]
+        tensors = []
+        valid_idx = []
+        for j, f in enumerate(batch_files):
+            try:
+                img = Image.open(f).convert("RGB")
+                tensors.append(preprocess(img))
+                valid_idx.append(j)
+            except Exception:
+                pass
+        if not tensors:
+            scores.extend([0.0] * len(batch_files))
+            continue
+        batch_tensor = torch.stack(tensors).to(device)
+        with torch.no_grad():
+            img_features = model.encode_image(batch_tensor)
+            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+            sims = (img_features @ text_features.T)                    
+            batch_scores = sims.max(dim=1).values.cpu().tolist()
+        result = [0.0] * len(batch_files)
+        for k, idx in enumerate(valid_idx):
+            result[idx] = batch_scores[k]
+        scores.extend(result)
+    return scores
+
+def encode_prompts(prompts: list[str], tokenizer, model, device):
+    tokens = tokenizer(prompts).to(device)
+    with torch.no_grad():
+        feats = model.encode_text(tokens)
+        feats = feats / feats.norm(dim=-1, keepdim=True)
+    return feats
+
+                                                                               
+
+def download_url(url: str, dest: Path) -> bool:
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code != 200 or "image" not in r.headers.get("Content-Type", ""):
+            return False
+        img = Image.open(BytesIO(r.content))
+        w, h = img.size
+        if w < MIN_W or h < MIN_H:
+            return False
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(dest, "JPEG", quality=90)
+        return True
+    except Exception:
+        return False
+
+def refill_class(class_name: str, save_dir: Path, needed: int):
+                                                                       
+    if needed <= 0:
+        return
+    print(f"  ↺ {needed} yeni görsel indiriliyor...")
+    existing = len([f for f in save_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+    counter = existing
+    keywords = REFILL_KEYWORDS.get(class_name, [])
+
+    for kw in keywords:
+        if counter - existing >= needed:
+            break
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.images(
+                    kw, region="us-en", safesearch="off",
+                    type_image="photo", size="Medium",
+                    max_results=needed,
+                ))
+            time.sleep(2)
+        except Exception as e:
+            print(f"    DDG hatası: {e}")
+            continue
+
+        for item in results:
+            if counter - existing >= needed:
+                break
+            url = item.get("image", "")
+            if not url:
+                continue
+            dest = save_dir / f"{counter:06d}.jpg"
+            if download_url(url, dest):
+                counter += 1
+
+    added = counter - existing
+    print(f"  ✓ {added} yeni görsel eklendi")
+
+                                                                               
+
+def filter_class(class_name: str, model, preprocess, tokenizer, device,
+                 threshold: float, dry_run: bool):
+    save_dir = RAW_DIR / class_name
+    if not save_dir.exists():
+        print(f"  [ATLANDI] {save_dir} bulunamadı")
+        return
+
+    prompts = CLASS_PROMPTS[class_name]
+    text_features = encode_prompts(prompts, tokenizer, model, device)
+
+    files = sorted([f for f in save_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+    total = len(files)
+    print(f"  {total} görsel analiz ediliyor...")
+
+    scores = score_images_batch(files, text_features, preprocess, model, device)
+
+    low_score = [(s, f) for s, f in zip(scores, files) if s < threshold]
+    low_score.sort()
+    print(f"  Eşik altı ({threshold:.2f}): {len(low_score)} görsel")
+
+    if dry_run:
+        print("  [DRY-RUN] Silme işlemi yapılmadı. En düşük 5 skor:")
+        for score, f in low_score[:5]:
+            print(f"    {score:.3f} → {f.name}")
+        return
+
+    deleted = 0
+    for score, f in low_score:
+        try:
+            f.unlink()
+            deleted += 1
+        except Exception:
+            pass
+    print(f"  ✗ {deleted} görsel silindi")
+
+    if deleted > 0:
+        refill_class(class_name, save_dir, deleted)
+
+                                                                                
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Sadece raporla, silme")
+    parser.add_argument("--threshold", type=float, default=THRESHOLD,
+                        help=f"CLIP benzerlik eşiği (varsayılan: {THRESHOLD})")
+    parser.add_argument("--classes", nargs="+", default=list(CLASS_PROMPTS.keys()),
+                        help="Sadece belirtilen sınıfları işle")
+    args = parser.parse_args()
+
+    model, preprocess, tokenizer, device = load_clip()
+
+    print(f"\nEşik: {args.threshold} | Dry-run: {args.dry_run}")
+    print("=" * 60)
+
+    for cls in args.classes:
+        if cls not in CLASS_PROMPTS:
+            print(f"[{cls}] Bilinmeyen sınıf, atlanıyor")
+            continue
+        print(f"\n[{cls}]")
+        filter_class(cls, model, preprocess, tokenizer, device,
+                     args.threshold, args.dry_run)
+
+    print("\n" + "=" * 60)
+    print("ÖZET:")
+    for cls in args.classes:
+        d = RAW_DIR / cls
+        c = len([f for f in d.iterdir() if f.suffix.lower() in IMG_EXTS]) if d.exists() else 0
+        print(f"  {cls:15s}: {c} görsel")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+FILE: scripts/organize_data.py
+===============================================================================
+import os
+import shutil
+import random
+from pathlib import Path
+
+CARS_BODY_TYPE = Path(r"C:\Users\Barış\OneDrive\Masaüstü\Cars_Body_Type")
+STANFORD       = Path(r"C:\Users\Barış\OneDrive\Masaüstü\stanford_cars_type")
+F1_SOURCE      = Path(r"C:\Users\Barış\OneDrive\Masaüstü\Formula One Cars")
+RAW_DIR        = Path("data/raw")
+
+MAX_PER_CLASS  = 800
+
+IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+def copy_images(src_dir: Path, dest_dir: Path, label: str, existing_count: int, limit: int) -> int:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    files = [f for f in src_dir.rglob("*") if f.suffix.lower() in IMG_EXTS and f.is_file()]
+    random.shuffle(files)
+
+    counter = existing_count
+    copied  = 0
+    for f in files:
+        if counter >= limit:
+            break
+        dest = dest_dir / f"{counter:06d}{f.suffix.lower()}"
+        shutil.copy2(f, dest)
+        counter += 1
+        copied  += 1
+
+    print(f"  [{label}] {copied} görsel kopyalandı → {dest_dir} (toplam {counter})")
+    return counter
+
+def count_existing(dest_dir: Path) -> int:
+    if not dest_dir.exists():
+        return 0
+    return len([f for f in dest_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+
+def main():
+    random.seed(42)
+
+    print("=" * 60)
+    print("Veri organizasyonu başlıyor...")
+    print(f"Hedef: {RAW_DIR.resolve()}")
+    print(f"Sınıf başı maksimum: {MAX_PER_CLASS}")
+    print("=" * 60)
+
+    print("\n[SUV]")
+    dest = RAW_DIR / "SUV"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS:
+        for split in ["train", "valid", "test"]:
+            src = CARS_BODY_TYPE / split / "SUV"
+            if src.exists() and n < MAX_PER_CLASS:
+                n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
+        src = STANFORD / "SUV"
+        if src.exists() and n < MAX_PER_CLASS:
+            n = copy_images(src, dest, "Stanford/SUV", n, MAX_PER_CLASS)
+    print(f"  → TOPLAM SUV: {count_existing(dest)}")
+
+    print("\n[SEDAN]")
+    dest = RAW_DIR / "SEDAN"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS:
+        for split in ["train", "valid", "test"]:
+            src = CARS_BODY_TYPE / split / "Sedan"
+            if src.exists() and n < MAX_PER_CLASS:
+                n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
+        src = STANFORD / "Sedan"
+        if src.exists() and n < MAX_PER_CLASS:
+            n = copy_images(src, dest, "Stanford/Sedan", n, MAX_PER_CLASS)
+    print(f"  → TOPLAM SEDAN: {count_existing(dest)}")
+
+    print("\n[HATCHBACK]")
+    dest = RAW_DIR / "HATCHBACK"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS:
+        for split in ["train", "valid", "test"]:
+            src = CARS_BODY_TYPE / split / "Hatchback"
+            if src.exists() and n < MAX_PER_CLASS:
+                n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
+        src = STANFORD / "Hatchback"
+        if src.exists() and n < MAX_PER_CLASS:
+            n = copy_images(src, dest, "Stanford/Hatchback", n, MAX_PER_CLASS)
+    print(f"  → TOPLAM HATCHBACK: {count_existing(dest)}")
+
+    print("\n[PICKUP]")
+    dest = RAW_DIR / "PICKUP"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS:
+        for split in ["train", "valid", "test"]:
+            for folder_name in ["Pick-Up", "Pickup", "pick-up"]:
+                src = CARS_BODY_TYPE / split / folder_name
+                if src.exists() and n < MAX_PER_CLASS:
+                    n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
+                    break
+    print(f"  → TOPLAM PICKUP: {count_existing(dest)}")
+
+    print("\n[VAN]")
+    dest = RAW_DIR / "VAN"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS:
+        for split in ["train", "valid", "test"]:
+            src = CARS_BODY_TYPE / split / "VAN"
+            if src.exists() and n < MAX_PER_CLASS:
+                n = copy_images(src, dest, f"Cars_Body_Type/{split}", n, MAX_PER_CLASS)
+        src = STANFORD / "Van"
+        if src.exists() and n < MAX_PER_CLASS:
+            n = copy_images(src, dest, "Stanford/Van", n, MAX_PER_CLASS)
+    print(f"  → TOPLAM VAN: {count_existing(dest)}")
+
+    print("\n[STATION_WAGON]")
+    dest = RAW_DIR / "STATION_WAGON"
+    n = count_existing(dest)
+    print(f"  Mevcut (crawled): {n}")
+    src = STANFORD / "Wagon"
+    if src.exists() and n < MAX_PER_CLASS:
+        n = copy_images(src, dest, "Stanford/Wagon", n, MAX_PER_CLASS)
+    print(f"  → TOPLAM STATION_WAGON: {count_existing(dest)}")
+
+    print("\n[F1]")
+    dest = RAW_DIR / "F1"
+    n = count_existing(dest)
+    print(f"  Mevcut: {n}")
+    if n < MAX_PER_CLASS and F1_SOURCE.exists():
+        for team_dir in sorted(F1_SOURCE.iterdir()):
+            if team_dir.is_dir() and n < MAX_PER_CLASS:
+                n = copy_images(team_dir, dest, team_dir.name, n, MAX_PER_CLASS)
+    print(f"  → TOPLAM F1: {count_existing(dest)}")
+
+    micro_count = count_existing(RAW_DIR / "MICRO")
+    print(f"\n[MICRO] Mevcut: {micro_count} (değiştirilmedi)")
+
+    print("\n" + "=" * 60)
+    print("ÖZET:")
+    total = 0
+    for cls in ["F1", "HATCHBACK", "MICRO", "PICKUP", "SEDAN", "STATION_WAGON", "SUV", "VAN"]:
+        c = count_existing(RAW_DIR / cls)
+        total += c
+        status = "✓" if c >= 500 else "⚠ AZ"
+        print(f"  {cls:15s}: {c:4d} görsel  {status}")
+    print(f"  {'TOPLAM':15s}: {total:4d}")
+    print("=" * 60)
+    print("\nSONRAKI ADIM: python scripts/split_dataset.py")
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+FILE: scripts/split_dataset.py
+===============================================================================
+import os
+import shutil
+import random
+import argparse
+from pathlib import Path
+
+CLASSES = ['SUV', 'VAN', 'SEDAN', 'HATCHBACK', 'PICKUP', 'STATION_WAGON', 'MICRO', 'F1']
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
+
+KAGGLE_NAME_MAP = {
+    'suv': 'SUV',
+    'van': 'VAN',
+    'sedan': 'SEDAN',
+    'hatchback': 'HATCHBACK',
+    'pick-up': 'PICKUP',
+    'pickup': 'PICKUP',
+    'pick_up': 'PICKUP',
+    'station wagon': 'STATION_WAGON',
+    'station_wagon': 'STATION_WAGON',
+    'stationwagon': 'STATION_WAGON',
+    'wagon': 'STATION_WAGON',
+    'micro': 'MICRO',
+    'microcar': 'MICRO',
+    'city car': 'MICRO',
+    'f1': 'F1',
+    'formula 1': 'F1',
+    'open wheel': 'F1',
+}
+
+def collect_images(source_dir: Path) -> dict[str, list[Path]]:
+    collected: dict[str, list[Path]] = {cls: [] for cls in CLASSES}
+
+    for item in source_dir.rglob('*'):
+        if item.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        folder = item.parent.name.lower().strip()
+        mapped = KAGGLE_NAME_MAP.get(folder)
+        if mapped:
+            collected[mapped].append(item)
+
+    return collected
+
+def split_dataset(source_dir: Path, val_ratio: float = 0.15, test_ratio: float = 0.15, seed: int = 42):
+    random.seed(seed)
+    train_dir = source_dir.parent / 'train'
+    val_dir = source_dir.parent / 'val'
+    test_dir = source_dir.parent / 'test'
+
+    for d in [train_dir, val_dir, test_dir]:
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+
+    collected = collect_images(source_dir)
+
+    print("\n=== Veri Seti Bölme Başlıyor ===\n")
+    total_train, total_val, total_test = 0, 0, 0
+
+    for cls in CLASSES:
+        images = collected[cls]
+        if not images:
+            print(f"  [ATLANDI]  {cls:20s} — görsel bulunamadı")
+            continue
+
+        random.shuffle(images)
+        n_test = max(1, int(len(images) * test_ratio))
+        n_val  = max(1, int(len(images) * val_ratio))
+        test_imgs  = images[:n_test]
+        val_imgs   = images[n_test:n_test + n_val]
+        train_imgs = images[n_test + n_val:]
+
+        (train_dir / cls).mkdir(parents=True, exist_ok=True)
+        (val_dir   / cls).mkdir(parents=True, exist_ok=True)
+        (test_dir  / cls).mkdir(parents=True, exist_ok=True)
+
+        for img in train_imgs:
+            shutil.copy2(img, train_dir / cls / img.name)
+        for img in val_imgs:
+            shutil.copy2(img, val_dir / cls / img.name)
+        for img in test_imgs:
+            shutil.copy2(img, test_dir / cls / img.name)
+
+        total_train += len(train_imgs)
+        total_val   += len(val_imgs)
+        total_test  += len(test_imgs)
+        print(f"  [OK]  {cls:20s}  train={len(train_imgs):4d}  val={len(val_imgs):4d}  test={len(test_imgs):4d}  toplam={len(images):4d}")
+
+    print(f"\n=== Özet ===")
+    print(f"  Train toplam : {total_train}")
+    print(f"  Val toplam   : {total_val}")
+    print(f"  Test toplam  : {total_test}")
+    print(f"  Genel toplam : {total_train + total_val + total_test}")
+    print(f"\n  Train → {train_dir}")
+    print(f"  Val   → {val_dir}")
+    print(f"  Test  → {test_dir}")
+
+    missing = [cls for cls in CLASSES if not collected[cls]]
+    if missing:
+        print(f"\n  [UYARI] Eksik sınıflar: {', '.join(missing)}")
+        print("  Bu sınıflar için ek görsel toplamanız gerekiyor.\n")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Veri setini train/val/test olarak böler.')
+    parser.add_argument('--source',     type=str,   default='data/raw', help='Ham veri klasörü')
+    parser.add_argument('--val_ratio',  type=float, default=0.15,       help='Validasyon oranı (0–1)')
+    parser.add_argument('--test_ratio', type=float, default=0.15,       help='Test oranı (0–1)')
+    parser.add_argument('--seed',       type=int,   default=42,         help='Rastgelelik için seed')
+    args = parser.parse_args()
+
+    split_dataset(Path(args.source), args.val_ratio, args.test_ratio, args.seed)
+
+===============================================================================
+FILE: scripts/topup_dataset.py
+===============================================================================
+import os
+import shutil
+import argparse
+import hashlib
+import torch
+import open_clip
+from PIL import Image
+from pathlib import Path
+from tqdm import tqdm
+import time
+import requests
+from io import BytesIO
+from ddgs import DDGS
+
+                                                                               
+
+RAW_DIR   = Path("data/raw")
+IMG_EXTS  = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+TARGET    = 800
+THRESHOLD = 0.25
+
+DESKTOP = Path(r"C:\Users\Barış\OneDrive\Masaüstü")
+
+                               
+CLASS_PROMPTS = {
+    "F1": [
+        "a formula one racing car on track",
+        "an open wheel racing car exterior",
+        "a formula 1 car side view",
+    ],
+    "HATCHBACK": [
+        "a hatchback car exterior side view",
+        "a 3 door hatchback automobile exterior",
+        "a 5 door hatchback car photo",
+    ],
+    "MICRO": [
+        "a microcar city car exterior side view",
+        "a small miniature city car exterior",
+        "a kei car small automobile exterior",
+    ],
+    "PICKUP": [
+        "a pickup truck exterior side view",
+        "a pickup truck with cargo bed",
+        "a truck pickup automobile exterior",
+    ],
+    "SEDAN": [
+        "a sedan car exterior side view",
+        "a 4 door sedan automobile exterior",
+        "a sedan car photo",
+    ],
+    "STATION_WAGON": [
+        "a station wagon estate car exterior",
+        "an estate car side view exterior",
+        "a touring wagon car exterior",
+    ],
+    "SUV": [
+        "an SUV sport utility vehicle exterior",
+        "a sport utility vehicle side view",
+        "an SUV car exterior photo",
+    ],
+    "VAN": [
+        "a van vehicle exterior side view",
+        "a minivan cargo van exterior",
+        "a van automobile exterior photo",
+    ],
+}
+
+                                                                     
+DESKTOP_SOURCES = {
+    "F1": [
+        DESKTOP / "Formula One Cars",
+    ],
+    "HATCHBACK": [
+        DESKTOP / "Cars_Body_Type" / "train" / "Hatchback",
+        DESKTOP / "Cars_Body_Type" / "valid" / "Hatchback",
+        DESKTOP / "Cars_Body_Type" / "test"  / "Hatchback",
+        DESKTOP / "stanford_cars_type" / "Hatchback",
+    ],
+    "PICKUP": [
+        DESKTOP / "Cars_Body_Type" / "train" / "Pick-Up",
+        DESKTOP / "Cars_Body_Type" / "valid" / "Pick-Up",
+        DESKTOP / "Cars_Body_Type" / "test"  / "Pick-Up",
+    ],
+    "SEDAN": [
+        DESKTOP / "Cars_Body_Type" / "train" / "Sedan",
+        DESKTOP / "Cars_Body_Type" / "valid" / "Sedan",
+        DESKTOP / "Cars_Body_Type" / "test"  / "Sedan",
+        DESKTOP / "stanford_cars_type" / "Sedan",
+    ],
+    "STATION_WAGON": [
+        DESKTOP / "stanford_cars_type" / "Wagon",
+    ],
+    "SUV": [
+        DESKTOP / "Cars_Body_Type" / "train" / "SUV",
+        DESKTOP / "Cars_Body_Type" / "valid" / "SUV",
+        DESKTOP / "Cars_Body_Type" / "test"  / "SUV",
+        DESKTOP / "stanford_cars_type" / "SUV",
+    ],
+    "VAN": [
+        DESKTOP / "Cars_Body_Type" / "train" / "VAN",
+        DESKTOP / "Cars_Body_Type" / "valid" / "VAN",
+        DESKTOP / "Cars_Body_Type" / "test"  / "VAN",
+        DESKTOP / "stanford_cars_type" / "Van",
+    ],
+}
+
+                                    
+DDG_KEYWORDS = {}
+
+MICRO_KEYWORDS = [
+    "Seat Mii city car exterior side view photo",
+    "Skoda Citigo city car exterior side photo",
+    "Kia Picanto city car exterior side view",
+    "Hyundai i10 city car exterior side view",
+    "Renault Twingo city car exterior side",
+    "Fiat 500 city car exterior side view",
+    "Smart Fortwo city car exterior side view",
+    "Toyota Aygo city car exterior side photo",
+    "Volkswagen Up city car exterior side",
+    "Peugeot 108 city car exterior side view",
+    "Citroen C1 city car exterior side view",
+    "Suzuki Alto kei car exterior side view",
+    "Daihatsu Mira kei car exterior photo",
+    "Honda N-One kei car exterior side view",
+]
+
+STATION_WAGON_KEYWORDS = [
+    "station wagon estate car exterior side view photo",
+    "estate car wagon exterior side view photo",
+    "Volvo V60 station wagon exterior side view",
+    "Skoda Octavia Combi estate car exterior",
+    "Volkswagen Passat estate wagon exterior side",
+    "BMW 3 series touring wagon exterior side view",
+    "Mercedes C class estate wagon exterior photo",
+    "Audi A4 Avant wagon exterior side view",
+    "Subaru Outback station wagon exterior side",
+    "Ford Mondeo estate wagon exterior side view",
+    "Toyota Corolla wagon exterior side view photo",
+    "Opel Astra Sports Tourer estate exterior",
+    "Peugeot 308 SW estate exterior side view",
+    "Renault Megane estate wagon exterior photo",
+]
+
+DDG_KEYWORDS["MICRO"] = MICRO_KEYWORDS
+DDG_KEYWORDS["STATION_WAGON"] = STATION_WAGON_KEYWORDS
+
+                                          
+SW_PROMPTS = [
+    "a station wagon estate car exterior",
+    "an estate car side view exterior",
+    "a touring wagon car exterior",
+]
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+MIN_W, MIN_H = 200, 150
+
+                                                                                
+
+def load_clip():
+    print("CLIP modeli yükleniyor (ViT-B/32)...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        "ViT-B-32", pretrained="openai"
+    )
+    model = model.to(device).eval()
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    print(f"  Cihaz: {device}\n")
+    return model, preprocess, tokenizer, device
+
+def encode_prompts(prompts, tokenizer, model, device):
+    tokens = tokenizer(prompts).to(device)
+    with torch.no_grad():
+        feats = model.encode_text(tokens)
+        feats = feats / feats.norm(dim=-1, keepdim=True)
+    return feats
+
+def score_images_batch(files, text_features, preprocess, model, device, batch_size=64):
+    scores = []
+    for i in tqdm(range(0, len(files), batch_size), desc="    Analiz", ncols=72):
+        batch_files = files[i:i + batch_size]
+        tensors, valid_idx = [], []
+        for j, f in enumerate(batch_files):
+            try:
+                img = Image.open(f).convert("RGB")
+                tensors.append(preprocess(img))
+                valid_idx.append(j)
+            except Exception:
+                pass
+        if not tensors:
+            scores.extend([0.0] * len(batch_files))
+            continue
+        batch_tensor = torch.stack(tensors).to(device)
+        with torch.no_grad():
+            img_features = model.encode_image(batch_tensor)
+            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+            sims = (img_features @ text_features.T)
+            batch_scores = sims.max(dim=1).values.cpu().tolist()
+        result = [0.0] * len(batch_files)
+        for k, idx in enumerate(valid_idx):
+            result[idx] = batch_scores[k]
+        scores.extend(result)
+    return scores
+
+                                                                               
+
+def file_hash(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def build_existing_hashes(raw_class_dir: Path) -> set:
+                                                                         
+    hashes = set()
+    for f in raw_class_dir.iterdir():
+        if f.suffix.lower() in IMG_EXTS:
+            try:
+                hashes.add(file_hash(f))
+            except Exception:
+                pass
+    return hashes
+
+                                                                                
+
+def next_filename(raw_class_dir: Path) -> Path:
+                                                                     
+    existing = {f.stem for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS}
+    i = 1
+    while f"{i:06d}" in existing:
+        i += 1
+    return raw_class_dir / f"{i:06d}.jpg"
+
+def copy_from_desktop(class_name: str, raw_class_dir: Path,
+                       needed: int, existing_hashes: set, dry_run: bool) -> int:
+                                                                                        
+    sources = DESKTOP_SOURCES.get(class_name, [])
+    if not sources:
+        return 0
+
+                                       
+    candidates = []
+    for src_dir in sources:
+        if src_dir.exists():
+            for f in src_dir.rglob("*"):
+                if f.suffix.lower() in IMG_EXTS:
+                    candidates.append(f)
+
+    if not candidates:
+        print(f"    Desktop'ta kaynak bulunamadı: {[str(s) for s in sources]}")
+        return 0
+
+    import random
+    random.shuffle(candidates)
+
+    added = 0
+    for src in candidates:
+        if added >= needed:
+            break
+        try:
+            h = file_hash(src)
+            if h in existing_hashes:
+                continue             
+            img = Image.open(src)
+            w, h_px = img.size
+            if w < MIN_W or h_px < MIN_H:
+                continue
+            if dry_run:
+                added += 1
+                existing_hashes.add(h)
+                continue
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            dest = next_filename(raw_class_dir)
+            img.save(dest, "JPEG", quality=90)
+            existing_hashes.add(h)
+            added += 1
+        except Exception:
+            continue
+
+    return added
+
+def download_ddg(class_name: str, raw_class_dir: Path,
+                  needed: int, existing_hashes: set, dry_run: bool) -> int:
+                                                                 
+    keywords = DDG_KEYWORDS.get(class_name, MICRO_KEYWORDS)
+    if dry_run:
+        print(f"    [DRY-RUN] {needed} görsel indirilecek ({class_name})")
+        return needed               
+    added = 0
+    for kw in keywords:
+        if added >= needed:
+            break
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.images(
+                    kw, region="us-en", safesearch="off",
+                    type_image="photo", size="Medium",
+                    max_results=max(needed * 2, 30),
+                ))
+            time.sleep(2)
+        except Exception as e:
+            print(f"    DDG hata: {e}")
+            continue
+
+        for item in results:
+            if added >= needed:
+                break
+            url = item.get("image", "")
+            if not url:
+                continue
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=10)
+                if r.status_code != 200 or "image" not in r.headers.get("Content-Type", ""):
+                    continue
+                content = r.content
+                h = hashlib.md5(content).hexdigest()
+                if h in existing_hashes:
+                    continue
+                img = Image.open(BytesIO(content))
+                w, h_px = img.size
+                if w < MIN_W or h_px < MIN_H:
+                    continue
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                dest = next_filename(raw_class_dir)
+                img.save(dest, "JPEG", quality=90)
+                existing_hashes.add(h)
+                added += 1
+            except Exception:
+                continue
+
+    return added
+
+                                                                                
+
+def process_class(class_name: str, model, preprocess, tokenizer, device,
+                   threshold: float, dry_run: bool):
+    raw_class_dir = RAW_DIR / class_name
+    raw_class_dir.mkdir(parents=True, exist_ok=True)
+
+    files = sorted([f for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+    current = len(files)
+    print(f"\n[{class_name}]  mevcut: {current}")
+
+    prompts = CLASS_PROMPTS.get(class_name, SW_PROMPTS)
+    text_features = encode_prompts(prompts, tokenizer, model, device)
+
+                                                                                
+    print(f"  CLIP filtresi uygulanıyor ({threshold})...")
+    scores = score_images_batch(files, text_features, preprocess, model, device)
+    low = [(s, f) for s, f in zip(scores, files) if s < threshold]
+    low.sort()
+    print(f"  Eşik altı: {len(low)} görsel")
+
+    if dry_run:
+        print(f"  [DRY-RUN] {len(low)} silinecek. En düşük 5:")
+        for s, f in low[:5]:
+            print(f"    {s:.3f} → {f.name}")
+    else:
+        for _, f in low:
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        if low:
+            print(f"  ✗ {len(low)} görsel silindi")
+
+    after_filter = current - len(low)
+    needed = TARGET - after_filter
+    print(f"  Filtre sonrası: {after_filter}  →  {needed} görsel gerekiyor")
+
+    if needed <= 0:
+        print(f"  ✓ {class_name} zaten {TARGET}+ görsele sahip")
+        return
+
+                                                                                
+    existing_hashes = build_existing_hashes(raw_class_dir)
+
+    if class_name == "MICRO":
+        print(f"  DuckDuckGo'dan {needed} görsel indiriliyor...")
+        added = download_ddg(class_name, raw_class_dir, needed, existing_hashes, dry_run)
+    else:
+        print(f"  Desktop'tan {needed} görsel kopyalanıyor...")
+        added = copy_from_desktop(class_name, raw_class_dir, needed, existing_hashes, dry_run)
+        if added < needed:
+                                                               
+            still_needed = needed - added
+            print(f"  Desktop yetmedi ({added}/{needed}), DDG'den {still_needed} daha...")
+            added += download_ddg(class_name, raw_class_dir, still_needed, existing_hashes, dry_run)
+
+    print(f"  ✓ {added} yeni görsel eklendi (hedef: {needed})")
+
+                                                                                
+    if not dry_run and added > 0:
+                                                               
+        all_files = sorted([f for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+        new_files = all_files[after_filter:]                                       
+        if not new_files:
+            return
+        print(f"  Yeni {len(new_files)} görsel CLIP ile doğrulanıyor...")
+        new_scores = score_images_batch(new_files, text_features, preprocess, model, device)
+        bad_new = [(s, f) for s, f in zip(new_scores, new_files) if s < threshold]
+        bad_new.sort()
+        if bad_new:
+            print(f"  Yeni görsellerde {len(bad_new)} kötü görsel bulundu, siliniyor...")
+            for _, f in bad_new:
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+            print(f"  ✗ {len(bad_new)} yeni görsel kalite testini geçemedi (silindi)")
+        else:
+            print(f"  ✓ Tüm yeni görseller kalite testini geçti")
+
+              
+    final = len([f for f in raw_class_dir.iterdir() if f.suffix.lower() in IMG_EXTS])
+    print(f"  → Sonuç: {final} görsel")
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true", help="Silme/kopyalama yapma, sadece raporla")
+    parser.add_argument("--threshold", type=float, default=THRESHOLD)
+    args = parser.parse_args()
+
+    model, preprocess, tokenizer, device = load_clip()
+
+                                                   
+    classes = ["STATION_WAGON", "F1", "HATCHBACK", "MICRO", "PICKUP", "SEDAN", "SUV", "VAN"]
+
+    print(f"Eşik: {args.threshold} | Dry-run: {args.dry_run}")
+    print("=" * 60)
+
+    for cls in classes:
+        process_class(cls, model, preprocess, tokenizer, device,
+                      args.threshold, args.dry_run)
+
+    print("\n" + "=" * 60)
+    print("ÖZET:")
+    for cls in sorted(RAW_DIR.iterdir(), key=lambda x: x.name):
+        if cls.is_dir():
+            count = len([f for f in cls.iterdir() if f.suffix.lower() in IMG_EXTS])
+            status = "✓" if count >= TARGET else "✗"
+            print(f"  {status} {cls.name:<16}: {count}")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+FILE: scripts/train.py
+===============================================================================
+import os
+import json
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms, models
+from tqdm import tqdm
+
+                                                                                
+NUM_CLASSES = 8
+IMG_SIZE    = 224
+BATCH_SIZE  = 32
+EPOCHS      = 50
+LR          = 1e-4
+WEIGHT_DECAY = 1e-4
+PATIENCE    = 7                                
+
+DATA_DIR    = Path('data')
+MODEL_DIR   = Path('models')
+OUTPUT_DIR  = Path('outputs')
+
+                               
+CLASS_LABELS = {
+    'F1':            'Açık Tekerlekli (F1)',
+    'HATCHBACK':     'Hatchback',
+    'MICRO':         'Micro',
+    'PICKUP':        'Pick-Up',
+    'SEDAN':         'Sedan',
+    'STATION_WAGON': 'Station Wagon',
+    'SUV':           'SUV',
+    'VAN':           'Van',
+}
+
+def build_transforms():
+    train_tf = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(degrees=15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+        transforms.RandomPerspective(distortion_scale=0.2, p=0.3),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    val_tf = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return train_tf, val_tf
+
+def build_model(num_classes: int) -> nn.Module:
+                                                                          
+    model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+    in_features = model.classifier[1].in_features        
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+    return model
+
+def train_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+    running_loss, correct = 0.0, 0
+    for images, labels in tqdm(loader, desc='  Train', leave=False):
+        images, labels = images.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item() * images.size(0)
+        correct += (outputs.argmax(1) == labels).sum().item()
+    return running_loss / len(loader.dataset), correct / len(loader.dataset)
+
+def val_epoch(model, loader, criterion, device):
+    model.eval()
+    running_loss, correct = 0.0, 0
+    with torch.no_grad():
+        for images, labels in tqdm(loader, desc='  Val  ', leave=False):
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            running_loss += loss.item() * images.size(0)
+            correct += (outputs.argmax(1) == labels).sum().item()
+    return running_loss / len(loader.dataset), correct / len(loader.dataset)
+
+def main():
+    MODEL_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Device: {device}')
+
+                                                                                
+    train_tf, val_tf = build_transforms()
+
+    train_dataset = datasets.ImageFolder(DATA_DIR / 'train', transform=train_tf)
+    val_dataset   = datasets.ImageFolder(DATA_DIR / 'val',   transform=val_tf)
+
+                                                                  
+    num_workers = 0 if os.name == 'nt' else 4
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True,
+                              num_workers=num_workers, pin_memory=(device.type == 'cuda'))
+    val_loader   = DataLoader(val_dataset,   batch_size=BATCH_SIZE, shuffle=False,
+                              num_workers=num_workers, pin_memory=(device.type == 'cuda'))
+
+    print(f'Train: {len(train_dataset)} görsel | Val: {len(val_dataset)} görsel')
+    print(f'Sınıf eşlemesi: {train_dataset.class_to_idx}')
+
+                                                                                
+    model = build_model(NUM_CLASSES).to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=3, factor=0.5
+    )
+
+                                                                                
+    history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+    best_val_loss = float('inf')
+    epochs_no_improve = 0
+
+    for epoch in range(1, EPOCHS + 1):
+        print(f'\nEpoch {epoch}/{EPOCHS}')
+
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+        val_loss,   val_acc   = val_epoch(model, val_loader, criterion, device)
+
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['train_acc'].append(train_acc)
+        history['val_acc'].append(val_acc)
+
+        print(f'  Train  Loss={train_loss:.4f}  Acc={train_acc*100:.2f}%')
+        print(f'  Val    Loss={val_loss:.4f}  Acc={val_acc*100:.2f}%')
+
+        scheduler.step(val_loss)
+
+                          
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+                'val_acc': val_acc,
+                'class_to_idx': train_dataset.class_to_idx,
+            }, MODEL_DIR / 'best_model.pth')
+            print(f'  ✓ Model kaydedildi (val_loss={val_loss:.4f})')
+        else:
+            epochs_no_improve += 1
+            print(f'  Gelişme yok ({epochs_no_improve}/{PATIENCE})')
+            if epochs_no_improve >= PATIENCE:
+                print(f'\nEarly stopping! {PATIENCE} epoch boyunca iyileşme olmadı.')
+                break
+
+                             
+    history_path = OUTPUT_DIR / 'training_history.json'
+    with open(history_path, 'w') as f:
+        json.dump(history, f, indent=2)
+
+    model_size = os.path.getsize(MODEL_DIR / 'best_model.pth') / 1024 / 1024
+    print(f'\nEğitim tamamlandı!')
+    print(f'Model boyutu : {model_size:.1f} MB (sınır: 95 MB)')
+    print(f'Geçmiş       : {history_path}')
+
+if __name__ == '__main__':
+    main()
+
+===============================================================================
+FILE: scripts/evaluate.py
+===============================================================================
+import json
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from torchvision import datasets, transforms, models
+from torch.utils.data import DataLoader
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+
+                                                                                
+NUM_CLASSES = 8
+IMG_SIZE    = 224
+BATCH_SIZE  = 32
+
+DATA_DIR   = Path('data')
+MODEL_DIR  = Path('models')
+OUTPUT_DIR = Path('outputs')
+
+                                              
+CLASS_NAMES = ['F1', 'HATCHBACK', 'MICRO', 'PICKUP', 'SEDAN', 'STATION_WAGON', 'SUV', 'VAN']
+CLASS_LABELS = {
+    'F1':            'Açık Tekerlekli',
+    'HATCHBACK':     'Hatchback',
+    'MICRO':         'Micro',
+    'PICKUP':        'Pick-Up',
+    'SEDAN':         'Sedan',
+    'STATION_WAGON': 'Station Wagon',
+    'SUV':           'SUV',
+    'VAN':           'Van',
+}
+DISPLAY_NAMES = [CLASS_LABELS[c] for c in CLASS_NAMES]
+
+def load_model(model_path: Path, device: torch.device) -> nn.Module:
+    model = models.efficientnet_b0(weights=None)
+    model.classifier[1] = nn.Linear(model.classifier[1].in_features, NUM_CLASSES)
+    checkpoint = torch.load(model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+    print(f"Model yüklendi — Epoch: {checkpoint['epoch']}, Val Acc: {checkpoint['val_acc']*100:.2f}%")
+    return model
+
+def get_predictions(model, loader, device):
+    all_preds, all_labels = [], []
+    with torch.no_grad():
+        for images, labels in tqdm(loader, desc='Değerlendirme'):
+            outputs = model(images.to(device))
+            preds = outputs.argmax(1).cpu().numpy()
+            all_preds.extend(preds)
+            all_labels.extend(labels.numpy())
+    return np.array(all_labels), np.array(all_preds)
+
+def plot_training_curves(history: dict, save_path: Path):
+    epochs = range(1, len(history['train_loss']) + 1)
+    save_dir = save_path.parent
+
+                                                                                
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+    ax.plot(epochs, history['train_loss'], color='#e74c3c', linewidth=2, label='Training Loss')
+    ax.plot(epochs, history['val_loss'],   color='#3498db', linewidth=2, label='Validation Loss')
+    ax.set_title('Training & Validation Loss', fontsize=13, fontweight='bold')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.legend()
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_dir / 'training_loss.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+                                                                                
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+    ax.plot(epochs, [a * 100 for a in history['train_acc']], color='#e74c3c', linewidth=2, label='Training Accuracy')
+    ax.plot(epochs, [a * 100 for a in history['val_acc']],   color='#3498db', linewidth=2, label='Validation Accuracy')
+    ax.set_title('Training & Validation Accuracy', fontsize=13, fontweight='bold')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy (%)')
+    ax.legend()
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_dir / 'training_accuracy.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print(f'Grafikler kaydedildi: training_loss.png, training_accuracy.png')
+
+def plot_confusion_matrix(y_true, y_pred, save_path: Path):
+    cm = confusion_matrix(y_true, y_pred)
+    cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
+
+    plt.figure(figsize=(5, 4.2))
+    sns.heatmap(
+        cm_norm,
+        annot=True,
+        fmt='.2f',
+        cmap='Blues',
+        xticklabels=DISPLAY_NAMES,
+        yticklabels=DISPLAY_NAMES,
+        linewidths=0.5,
+        vmin=0,
+        vmax=1,
+        annot_kws={"size": 7},
+    )
+    plt.title('Normalized Confusion Matrix', fontsize=10, fontweight='bold', pad=10)
+    plt.ylabel('Gerçek Sınıf', fontsize=9)
+    plt.xlabel('Tahmin Edilen Sınıf', fontsize=9)
+    plt.xticks(rotation=45, ha='right', fontsize=7)
+    plt.yticks(rotation=0, fontsize=7)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f'Confusion matrix kaydedildi: {save_path}')
+
+def main():
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    model_path = MODEL_DIR / 'best_model.pth'
+    if not model_path.exists():
+        print(f'HATA: {model_path} bulunamadı. Önce train.py çalıştırın.')
+        return
+
+    model = load_model(model_path, device)
+
+    val_transform = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+                                                                                  
+    eval_dir = DATA_DIR / 'test' if (DATA_DIR / 'test').exists() else DATA_DIR / 'val'
+    eval_label = 'TEST' if eval_dir.name == 'test' else 'VAL'
+    print(f'Değerlendirme seti: {eval_dir} ({eval_label})')
+
+    eval_dataset = datasets.ImageFolder(eval_dir, transform=val_transform)
+    eval_loader  = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+
+    print(f'Sınıf eşlemesi: {eval_dataset.class_to_idx}')
+
+    y_true, y_pred = get_predictions(model, eval_loader, device)
+
+                                                                                
+    report = classification_report(y_true, y_pred, target_names=DISPLAY_NAMES, digits=4)
+    print('\n=== Sınıflandırma Raporu ===')
+    print(report)
+
+    report_path = OUTPUT_DIR / 'metrics_report.txt'
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    print(f'Rapor kaydedildi: {report_path}')
+
+                                                                                
+    plot_confusion_matrix(y_true, y_pred, OUTPUT_DIR / 'confusion_matrix.png')
+
+    history_path = OUTPUT_DIR / 'training_history.json'
+    if history_path.exists():
+        with open(history_path) as f:
+            history = json.load(f)
+        plot_training_curves(history, OUTPUT_DIR / 'training_curves.png')
+    else:
+        print(f'[ATLA] training_history.json bulunamadı, eğitim grafikleri üretilmedi.')
+
+    print(f'\nTüm çıktılar: {OUTPUT_DIR}/')
+
+if __name__ == '__main__':
+    main()
+
+===============================================================================
+FILE: scripts/predict_submission.py
+===============================================================================
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install",
+                       "torch", "torchvision", "Pillow", "-q"],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms, models
+from PIL import Image
+
+MODEL_IDX_TO_CLASS_NUM = {
+    0: 5,
+    1: 7,
+    2: 4,
+    3: 8,
+    4: 6,
+    5: 3,
+    6: 1,
+    7: 2,
+}
+
+IMG_SIZE   = 224
+NUM_CLASSES = 8
+
+MODEL_PATH = "/content/best_model.pth"
+
+transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        model = models.efficientnet_b0(weights=None)
+        model.classifier[1] = nn.Linear(
+            model.classifier[1].in_features, NUM_CLASSES
+        )
+        checkpoint = torch.load(MODEL_PATH, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+        model.to(device)
+        _model = model
+        print(f"Model yüklendi — device: {device}")
+    return _model
+
+def Predict(file_path):
+    model = _get_model()
+
+    image_names = []
+    preds = []
+
+    SUPPORTED_EXTS = (".jpg", ".jpeg", ".png")
+
+    for class_folder in sorted(os.listdir(file_path)):
+        class_dir = os.path.join(file_path, class_folder)
+        if not os.path.isdir(class_dir):
+            continue
+
+        for fname in sorted(os.listdir(class_dir)):
+            if not fname.lower().endswith(SUPPORTED_EXTS):
+                continue
+
+            img_path = os.path.join(class_dir, fname)
+            try:
+                image = Image.open(img_path).convert("RGB")
+                tensor = transform(image).unsqueeze(0).to(device)
+
+                with torch.no_grad():
+                    output = model(tensor)
+                    model_idx = int(output.argmax(1).item())
+
+                pred_class_num = MODEL_IDX_TO_CLASS_NUM[model_idx]
+                image_names.append(fname)
+                preds.append(pred_class_num)
+
+            except Exception as e:
+                print(f"[HATA] {fname}: {e}")
+
+    filename = "/content/Preds.txt"
+    f = open(filename, "w", encoding="utf-8")
+
+    for i in range(len(preds)):
+        line = f"{image_names[i]} | Pred: {preds[i]}"
+        print(line)
+        f.write(line + "\n")
+
+    f.close()
+    print(f"\nToplam {len(preds)} görsel işlendi.")
+    print(f"Sonuçlar: {filename}")
+
+===============================================================================
+FILE: web/main.py
+===============================================================================
+import io
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms, models
+from PIL import Image
+
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+                                                                                
+MODEL_PATH  = Path('models/best_model.pth')
+STATIC_DIR  = Path('web/static')
+IMG_SIZE    = 224
+NUM_CLASSES = 8
+
+                                                     
+CLASS_NAMES = ['F1', 'HATCHBACK', 'MICRO', 'PICKUP', 'SEDAN', 'STATION_WAGON', 'SUV', 'VAN']
+CLASS_LABELS = {
+    'F1':            'Açık Tekerlekli (F1)',
+    'HATCHBACK':     'Hatchback',
+    'MICRO':         'Micro',
+    'PICKUP':        'Pick-Up',
+    'SEDAN':         'Sedan',
+    'STATION_WAGON': 'Station Wagon',
+    'SUV':           'SUV',
+    'VAN':           'Van',
+}
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+                                                                                
+def load_model():
+    if not MODEL_PATH.exists():
+        return None
+    model = models.efficientnet_b0(weights=None)
+    model.classifier[1] = nn.Linear(model.classifier[1].in_features, NUM_CLASSES)
+    checkpoint = torch.load(MODEL_PATH, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    model.to(device)
+    print(f'Model yüklendi — device: {device}')
+    return model
+
+model = load_model()
+
+                                                                                
+transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+                                                                                
+app = FastAPI(
+    title='Araba Gövde Tipi Sınıflandırıcı',
+    description='EfficientNet-B0 ile 8 farklı araba gövde tipi sınıflandırması — Kocaeli Üniversitesi',
+    version='1.0.0',
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
+app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
+
+@app.get('/', response_class=HTMLResponse)
+async def root():
+    html_path = STATIC_DIR / 'index.html'
+    return HTMLResponse(content=html_path.read_text(encoding='utf-8'))
+
+@app.get('/health')
+async def health():
+    return {
+        'status': 'ok' if model is not None else 'model_not_loaded',
+        'device': str(device),
+        'model_loaded': model is not None,
+        'model_path': str(MODEL_PATH),
+    }
+
+@app.post('/predict')
+async def predict(file: UploadFile = File(...)):
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail='Model henüz yüklenmedi. Önce scripts/train.py çalıştırın.',
+        )
+
+    if not file.content_type or not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail='Sadece görüntü dosyaları kabul edilir.')
+
+    contents = await file.read()
+
+    try:
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+    except Exception:
+        raise HTTPException(status_code=400, detail='Görüntü dosyası okunamadı.')
+
+    tensor = transform(image).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        outputs = model(tensor)
+        probabilities = F.softmax(outputs, dim=1)[0]
+
+    probs = probabilities.cpu().numpy().tolist()
+    top_idx = int(probabilities.argmax().item())
+    top_class = CLASS_NAMES[top_idx]
+    top_label = CLASS_LABELS[top_class]
+    top_confidence = float(probs[top_idx])
+
+    all_predictions = [
+        {
+            'class_key':   CLASS_NAMES[i],
+            'class_label': CLASS_LABELS[CLASS_NAMES[i]],
+            'probability': round(probs[i], 4),
+        }
+        for i in range(NUM_CLASSES)
+    ]
+    all_predictions.sort(key=lambda x: x['probability'], reverse=True)
+
+    return JSONResponse({
+        'prediction':        top_label,
+        'class_key':         top_class,
+        'confidence':        round(top_confidence, 4),
+        'confidence_percent': f'{top_confidence * 100:.1f}%',
+        'all_predictions':   all_predictions,
+    })
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("web.main:app", host="127.0.0.1", port=8000, reload=True)
+
+===============================================================================
+FILE: web/static/index.html
+===============================================================================
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Araba Gövde Tipi Sınıflandırıcı</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <header class="site-header">
+    <h1>Araba Gövde Tipi Sınıflandırıcı</h1>
+    <p>EfficientNet-B0 &nbsp;·&nbsp; 8 Sınıf &nbsp;·&nbsp; Kocaeli Üniversitesi</p>
+  </header>
+
+  <main class="main-grid">
+
+    <section class="panel upload-panel">
+      <h2>Görsel Yükle</h2>
+
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Görsel yükle">
+        <div class="drop-icon">📁</div>
+        <p>Sürükleyip bırakın veya tıklayın</p>
+        <span>JPG &nbsp;·&nbsp; PNG &nbsp;·&nbsp; WEBP</span>
+        <input type="file" id="fileInput" accept="image/*" hidden />
+      </div>
+
+      <div class="preview-wrapper" id="previewWrapper" style="display:none">
+        <img id="previewImage" alt="Yüklenen görselin önizlemesi" />
+        <button id="predictBtn" class="btn-primary">
+          <span id="btnText">Tahmin Yap</span>
+          <span id="btnLoader" class="loader" style="display:none" aria-hidden="true"></span>
+        </button>
+        <button id="resetBtn" class="btn-secondary">Sıfırla</button>
+      </div>
+    </section>
+
+    <section class="panel result-panel" id="resultPanel" style="display:none" aria-live="polite">
+      <h2>Tahmin Sonucu</h2>
+
+      <div class="result-badge">
+        <div class="result-class" id="resultClass">—</div>
+        <div class="result-conf"  id="resultConf">—</div>
+      </div>
+
+      <div class="chart-wrapper">
+        <canvas id="barChart" aria-label="Sınıf olasılık dağılımı" role="img"></canvas>
+      </div>
+
+      <p id="errorMsg" class="error-msg" style="display:none"></p>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
+
+===============================================================================
+FILE: web/static/style.css
+===============================================================================
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary:       #2563eb;
+  --primary-dark:  #1d4ed8;
+  --primary-light: #93c5fd;
+  --primary-bg:    #eff6ff;
+  --bg:            #f1f5f9;
+  --surface:       #ffffff;
+  --border:        #e2e8f0;
+  --text:          #1e293b;
+  --text-muted:    #64748b;
+  --success:       #16a34a;
+  --shadow:        0 4px 6px -1px rgb(0 0 0 / .07), 0 2px 4px -2px rgb(0 0 0 / .07);
+  --radius:        14px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+
+.site-header {
+  background: var(--primary);
+  color: #fff;
+  text-align: center;
+  padding: 28px 24px;
+}
+.site-header h1 { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em; }
+.site-header p  { margin-top: 6px; opacity: .85; font-size: .9rem; }
+
+
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  max-width: 1080px;
+  margin: 32px auto;
+  padding: 0 24px;
+}
+@media (max-width: 740px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+
+.panel {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+.panel h2 {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 44px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s, color .2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  outline: none;
+}
+.drop-zone:hover,
+.drop-zone:focus,
+.drop-zone.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.drop-icon { font-size: 2.8rem; line-height: 1; }
+.drop-zone p    { font-size: .95rem; font-weight: 600; }
+.drop-zone span { font-size: .78rem; }
+
+
+.preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#previewImage {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+
+.btn-primary {
+  width: 100%;
+  padding: 13px;
+  border: none;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background .2s, transform .15s, box-shadow .2s;
+  box-shadow: 0 2px 8px rgb(37 99 235 / .35);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgb(37 99 235 / .4);
+}
+.btn-primary:disabled { opacity: .6; cursor: not-allowed; }
+
+.btn-secondary {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .9rem;
+  cursor: pointer;
+  transition: background .2s;
+}
+.btn-secondary:hover { background: var(--bg); }
+
+
+.loader {
+  width: 17px;
+  height: 17px;
+  border: 2px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .65s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+
+.result-badge {
+  background: var(--primary-bg);
+  border: 1.5px solid var(--primary-light);
+  border-radius: 10px;
+  padding: 22px 16px;
+  text-align: center;
+  margin-bottom: 22px;
+}
+.result-class {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--primary);
+  letter-spacing: -0.01em;
+}
+.result-conf {
+  font-size: .9rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+
+.chart-wrapper {
+  position: relative;
+  min-height: 200px;
+}
+
+
+.error-msg {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  border-radius: 8px;
+  font-size: .875rem;
+}
+
+
+===============================================================================
+FILE: web/static/app.js
+===============================================================================
+
+
+const dropZone      = document.getElementById('dropZone');
+const fileInput     = document.getElementById('fileInput');
+const previewWrapper = document.getElementById('previewWrapper');
+const previewImage  = document.getElementById('previewImage');
+const predictBtn    = document.getElementById('predictBtn');
+const resetBtn      = document.getElementById('resetBtn');
+const btnText       = document.getElementById('btnText');
+const btnLoader     = document.getElementById('btnLoader');
+const resultPanel   = document.getElementById('resultPanel');
+const resultClass   = document.getElementById('resultClass');
+const resultConf    = document.getElementById('resultConf');
+const errorMsg      = document.getElementById('errorMsg');
+
+let currentFile = null;
+let barChart    = null;
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) handleFile(file);
+});
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  currentFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    previewImage.src = e.target.result;
+    dropZone.style.display        = 'none';
+    previewWrapper.style.display  = 'flex';
+    resultPanel.style.display     = 'none';
+    hideError();
+  };
+  reader.readAsDataURL(file);
+}
+
+resetBtn.addEventListener('click', reset);
+
+function reset() {
+  currentFile = null;
+  fileInput.value = '';
+  previewWrapper.style.display = 'none';
+  dropZone.style.display       = 'flex';
+  resultPanel.style.display    = 'none';
+  hideError();
+  if (barChart) { barChart.destroy(); barChart = null; }
+}
+
+predictBtn.addEventListener('click', async () => {
+  if (!currentFile) return;
+
+  setLoading(true);
+  hideError();
+
+  try {
+    const formData = new FormData();
+    formData.append('file', currentFile);
+
+    const res = await fetch('/predict', { method: 'POST', body: formData });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(err.detail || 'Sunucu hatası');
+    }
+
+    const data = await res.json();
+    showResults(data);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+function showResults(data) {
+  resultClass.textContent = data.prediction;
+  resultConf.textContent  = `Güven: ${data.confidence_percent}`;
+  resultPanel.style.display = 'block';
+
+  const labels = data.all_predictions.map(p => p.class_label);
+  const values = data.all_predictions.map(p => +(p.probability * 100).toFixed(2));
+  const colors = data.all_predictions.map(p =>
+    p.class_key === data.class_key ? '#2563eb' : '#bfdbfe'
+  );
+
+  if (barChart) barChart.destroy();
+
+  barChart = new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Olasılık (%)',
+        data: values,
+        backgroundColor: colors,
+        borderRadius: 5,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ` ${ctx.parsed.x.toFixed(2)}%` },
+        },
+      },
+      scales: {
+        x: {
+          max: 100,
+          ticks: { callback: v => v + '%' },
+          grid: { color: 'rgba(0,0,0,.06)' },
+        },
+        y: {
+          grid: { display: false },
+        },
+      },
+    },
+  });
+}
+
+function setLoading(on) {
+  predictBtn.disabled         = on;
+  btnText.style.display       = on ? 'none'         : 'inline';
+  btnLoader.style.display     = on ? 'inline-block' : 'none';
+}
+
+function showError(msg) {
+  errorMsg.textContent    = `Hata: ${msg}`;
+  errorMsg.style.display  = 'block';
+  resultPanel.style.display = 'block';
+  resultClass.textContent = '—';
+  resultConf.textContent  = '—';
+}
+
+function hideError() {
+  errorMsg.style.display = 'none';
+}
